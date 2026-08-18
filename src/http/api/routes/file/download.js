@@ -4,6 +4,22 @@ const { throwHttpError, rangeParser } = require('../../utils/Util')
 const HTTP_CODE = require('../../constants/httpCode')
 const db = require('../../services/database')
 
+const INLINE_TYPES = new Set([
+  'video/mp4',
+  'video/webm',
+  'video/ogg',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/wav',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'text/plain'
+])
+
 module.exports.opts = {
     config: {
         ACCESS_TAGS: ['READ_ONLY_PANEL', 'READ_ONLY_FILE'],
@@ -44,14 +60,21 @@ module.exports.handler = async (req, reply) => {
     if (!file.parts.length) throwHttpError('Corrupt file', HTTP_CODE.INTERNAL_SERVER_ERROR)
 
     //
+    // Determine MIME type and whether it should be displayed inline
+    //
+    const mimeType = mime.lookup(path.extname(file.name))
+    const isInline = INLINE_TYPES.has(mimeType)
+
+    //
     // Prepare response headers
     //
     const resHeaders = {
         'Content-Length': file.size,
         'Accept-Ranges': 'bytes',
-        'Content-Disposition': `attachment; filename="${encodeURI(file.name)}"`,
+        'Content-Disposition': isInline
+            ? `inline; filename="${encodeURI(file.name)}"`
+            : `attachment; filename="${encodeURI(file.name)}"`,
     }
-    const mimeType = mime.lookup(path.extname(file.name))
     if (mimeType) resHeaders['Content-Type'] = mimeType
 
     //
