@@ -243,3 +243,25 @@ test('with AUTH_MODE=basic, unauthenticated requests to the API are rejected', a
         await t.close()
     }
 })
+
+test('bad input is reported as a client error, never as an internal error', async () => {
+    const t = await setup()
+    try {
+        // an event target without a name/url is the caller's mistake
+        const target = await t.json('POST', '/api/admin/events', { event: 'OBJECT_CREATED' })
+        assert.equal(target.statusCode, 400, 'a malformed event target must be 400, not 500')
+        assert.equal(t.body(target).code, 'ValidationError')
+
+        // and an over-long object key is a client error too, not an internal one
+        const longKey = 'k'.repeat(1025)
+        const put = await t.json('PUT', `/api/buckets/rest-bucket/objects/${longKey}`, {})
+        assert.equal(put.statusCode, 400, 'an over-long key must be 400, not 500')
+        assert.equal(t.body(put).code, 'KeyTooLong')
+
+        // the same request with a valid body still works
+        const ok = await t.json('POST', '/api/admin/events', { name: 'on-create', url: 'http://127.0.0.1:1/hook', events: ['OBJECT_CREATED'] })
+        assert.equal(ok.statusCode, 201)
+    } finally {
+        await t.close()
+    }
+})

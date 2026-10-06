@@ -14,7 +14,7 @@
  */
 const { Readable, PassThrough } = require('stream')
 const { randomUUID } = require('crypto')
-const { errors } = require('../lib/errors')
+const { errors, StorageError } = require('../lib/errors')
 const util = require('../lib/util')
 const { writeChunksFromStream } = require('./chunkWriter')
 
@@ -339,7 +339,7 @@ class Objects {
         } = opts
         const key = util.normalizeKey(path)
         if (!key) throw errors.invalidArgument('Object key is empty')
-        if (key.length > 1024) throw new Error('KeyTooLong')
+        if (key.length > 1024) throw new StorageError('KeyTooLong', 'The object key is longer than 1024 bytes.', { statusCode: 400 })
 
         const existing = await this.getNode(bucket.id, key)
         const versioning = bucket.versioning === 'enabled' ? 'enabled' : bucket.versioning === 'suspended' ? 'suspended' : 'off'

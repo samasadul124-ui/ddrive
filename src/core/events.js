@@ -13,6 +13,7 @@
  */
 const { randomUUID } = require('crypto')
 const util = require('../lib/util')
+const { errors } = require('../lib/errors')
 
 const S3_EVENT_NAMES = {
     OBJECT_CREATED: 's3:ObjectCreated:Put',
@@ -234,7 +235,7 @@ const createEvents = (deps = {}) => {
     const listTargets = () => repo.find('event_target', {}, { orderBy: [{ column: 'name', dir: 'asc' }] })
 
     const createTarget = async (input) => {
-        if (!input.name || !input.url) throw new Error('event target requires a name and a url')
+        if (!input.name || !input.url) throw errors.validation('An event target requires a name and a url')
         return repo.insert('event_target', {
             name: input.name,
             type: input.type || 'webhook',
