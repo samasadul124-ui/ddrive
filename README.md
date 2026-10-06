@@ -7,6 +7,15 @@
 
 ## 60-second quickstart (SQLite + local disk)
 
+One line — clone, install, run (PowerShell 5.1 and bash both accept `;`):
+
+```bash
+git clone -b arena/2ed54c7d-ddrive https://github.com/samasadul124-ui/ddrive.git ddrive; cd ddrive; npm install; npm start
+```
+
+Then open <http://localhost:3000> and drop a file on the page. Already have the
+clone? `git pull; npm install; npm start` is enough.
+
 ```bash
 npm install
 npm start
