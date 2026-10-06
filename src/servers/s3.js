@@ -374,15 +374,13 @@ const createS3Server = (context, deps = {}) => {
         await auditFor(req, 's3.PutObject', bucket, key, {
             size: written.size, storageClass: storageClass || 'STANDARD', versionId: written.versionId,
         })
-        send(req, reply, '', {
+        return send(req, reply, '', {
             headers: {
                 etag: `"${written.etag}"`,
                 'x-amz-version-id': written.versionId,
                 'x-amz-storage-class': storageClass,
             },
         })
-
-        return reply.send('')
     }
 
     const copyObject = async (req, reply, bucket, key, copySource) => {
@@ -441,15 +439,13 @@ const createS3Server = (context, deps = {}) => {
             actor: actorOf(req),
         })
         await auditFor(req, 's3.DeleteObject', bucket, key, { versionId, deleteMarker: !!result_.deleteMarker })
-        send(req, reply, '', {
+        return send(req, reply, '', {
             statusCode: 204,
             headers: {
                 'x-amz-version-id': result_.versionId || versionId || 'null',
                 'x-amz-delete-marker': result_.deleteMarker ? 'true' : undefined,
             },
         })
-
-        return reply.send('')
     }
 
     const deleteObjects = async (req, reply, bucket) => {
@@ -585,9 +581,7 @@ const createS3Server = (context, deps = {}) => {
             }
             if (isDelete) {
                 await buckets.setPolicy(bucket.name, null, actorOf(req))
-                send(req, reply, '', { statusCode: 204 })
-
-                return reply.send('')
+                return send(req, reply, '', { statusCode: 204 })
             }
             const policy = await buckets.getPolicy(bucket.name)
 
@@ -655,9 +649,7 @@ const createS3Server = (context, deps = {}) => {
                     // eslint-disable-next-line no-await-in-loop
                     await lifecycle.deleteRule(rule.id)
                 }
-                send(req, reply, '', { statusCode: 204 })
-
-                return reply.send('')
+                return send(req, reply, '', { statusCode: 204 })
             }
             const rules = await lifecycle.listRules(bucket)
             if (!rules.length) throw new StorageError('NoSuchLifecycleConfiguration', 'The lifecycle configuration does not exist')
@@ -705,9 +697,7 @@ const createS3Server = (context, deps = {}) => {
                 return send(req, reply, result('ReplicationConfiguration', `${el('Role', 'arn:aws:iam::ddrive:role/replication')}${created.map((name) => `<Rule>${el('ID', name)}${el('Status', 'Enabled')}<Destination>${el('Bucket', bucket.name)}</Destination></Rule>`).join('')}`))
             }
             if (isDelete) {
-                send(req, reply, '', { statusCode: 204 })
-
-                return reply.send('')
+                return send(req, reply, '', { statusCode: 204 })
             }
             const peers = await replication.listPeers()
             const rules = peers.filter((peer) => peer.direction !== 'inbound').map((peer) => `<Rule>${el('ID', peer.name)}${el('Status', peer.status === 'enabled' ? 'Enabled' : 'Disabled')}<Destination>${el('Bucket', peer.bucket || bucket.name)}${peer.endpoint ? el('Endpoint', peer.endpoint) : ''}</Destination></Rule>`).join('')
@@ -766,9 +756,7 @@ const createS3Server = (context, deps = {}) => {
             }
             if (req.method === 'DELETE') {
                 await objects.deleteTags(bucket, key, actorOf(req))
-                send(req, reply, '', { statusCode: 204 })
-
-                return reply.send('')
+                return send(req, reply, '', { statusCode: 204 })
             }
             const tags = await objects.getTags(bucket, key)
 
@@ -915,9 +903,7 @@ const createS3Server = (context, deps = {}) => {
                     const force = String(queryValue(req, 'force') || '') === 'true'
                     await buckets.remove(bucketName, { force, actor: principal?.name })
                     await auditFor(req, 's3.DeleteBucket', bucket, null, { force })
-                    send(req, reply, '', { statusCode: 204 })
-
-                    return reply.send('')
+                    return send(req, reply, '', { statusCode: 204 })
                 }
                 if (req.method === 'POST' && hasQuery(req, 'delete')) {
                     await auth.authorize(req, principal, 's3:DeleteObject', { bucket: bucketName })
@@ -952,9 +938,7 @@ const createS3Server = (context, deps = {}) => {
                     }
                     // PUT on an existing bucket is idempotent (S3 behaviour)
                     await auth.authorize(req, principal, 's3:CreateBucket', { bucket: bucketName })
-                    send(req, reply, '', { statusCode: 200, headers: { location: `/${bucketName}` } })
-
-                    return reply.send('')
+                    return send(req, reply, '', { statusCode: 200, headers: { location: `/${bucketName}` } })
                 }
                 if (req.method === 'DELETE' && hasSubresource) {
                     await auth.authorize(req, principal, 's3:PutBucketPolicy', { bucket: bucketName })
@@ -989,9 +973,7 @@ const createS3Server = (context, deps = {}) => {
                 await auth.authorize(req, principal, 's3:AbortMultipartUpload', { bucket: bucketName, key })
                 await objects.abortMultipart(bucket, queryValue(req, 'uploadId'))
                 await auditFor(req, 's3.AbortMultipartUpload', bucket, key, { uploadId: queryValue(req, 'uploadId') })
-                send(req, reply, '', { statusCode: 204 })
-
-                return reply.send('')
+                return send(req, reply, '', { statusCode: 204 })
             }
             const objectSub = ['tagging', 'retention', 'legal-hold', 'attributes', 'restore'].some((name) => hasQuery(req, name))
             if (objectSub) {

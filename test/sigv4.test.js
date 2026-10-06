@@ -67,7 +67,11 @@ test('verifyRequest rejects a tampered signature and a stale date', () => {
         method: 'GET', url: 'http://127.0.0.1:3111/s3/bucket/key.txt', payloadHash,
     }, CREDENTIALS, { region: 'us-east-1', service: 's3' })
 
-    const tampered = { ...headers, authorization: headers.authorization.replace(/Signature=./, 'Signature=a') }
+    // Flip the first signature character to one it is guaranteed not to be,
+    // otherwise the "tampered" signature is occasionally the valid one (hex output).
+    const signature = headers.authorization.slice(headers.authorization.indexOf('Signature=') + 'Signature='.length)
+    const flipped = (signature[0] === '0' ? '1' : '0') + signature.slice(1)
+    const tampered = { ...headers, authorization: headers.authorization.replace(/Signature=[0-9a-f]+$/, `Signature=${flipped}`) }
     assert.throws(
         () => sigv4.verifyRequest(
             { method: 'GET', rawPath: '/s3/bucket/key.txt', query: '', headers: tampered, payloadHash },
