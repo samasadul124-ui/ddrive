@@ -43,6 +43,22 @@ Anything you upload is split into ~10 MB chunks and encrypted with AES-256-GCM
 before it is written to disk, so the `data/` folder never contains readable
 file contents.
 
+## Want proof it works on your machine?
+
+Start the server, then open a **second** terminal in the same folder and run:
+
+```powershell
+npm run check
+```
+
+It uploads real bytes through the web panel's own endpoint, WebDAV and the S3 API,
+downloads them again, compares them byte for byte, verifies the audit chain and the
+key file, and then deletes its test data. You should see `22 checks passed, 0 failed`.
+Add credentials if you turned a password on: `$env:DDRIVE_USER='admin'; $env:DDRIVE_PASSWORD='…'; npm run check`.
+
+Requires **Node.js 22.5 or newer** — if yours is older, the server now says so
+plainly instead of crashing with a stack trace.
+
 ## The other ways in
 
 | Surface | Where | How to use it |

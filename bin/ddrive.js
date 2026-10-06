@@ -20,6 +20,28 @@ process.on('warning', (warning) => {
     console.warn(`${warning.name}: ${warning.message}`)
 })
 
+/**
+ * The zero-dependency SQLite driver is Node's own `node:sqlite` (>= 22.5). On an
+ * older runtime that shows up as a stack trace deep inside the driver, so say it
+ * plainly before anything else is loaded.
+ */
+const REQUIRED_NODE = [22, 5, 0]
+const nodeVersionOk = () => {
+    const [major, minor] = process.versions.node.split('.').map(Number)
+    if (major > REQUIRED_NODE[0]) return true
+    if (major === REQUIRED_NODE[0] && minor >= REQUIRED_NODE[1]) return true
+
+    return false
+}
+if (!nodeVersionOk() && String(process.env.DB_DRIVER || 'sqlite') === 'sqlite') {
+    /* eslint-disable no-console */
+    console.error(`[ddrive] Node.js ${REQUIRED_NODE.join('.')} or newer is required (you have ${process.versions.node}).`)
+    console.error('[ddrive] The default database driver uses Node\'s built-in SQLite. Install a current Node from https://nodejs.org and run this command again.')
+    console.error('[ddrive] (Alternatively set DB_DRIVER=postgres with a Postgres server - not needed on a laptop.)')
+    /* eslint-enable no-console */
+    process.exit(1)
+}
+
 const { loadConfig } = require('../src/config')
 const { createHttpServer } = require('../src')
 const { humanBytes } = require('../src/lib/limits')

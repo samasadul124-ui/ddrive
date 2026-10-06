@@ -23,11 +23,12 @@
     "migration:make": "knex migrate:make",
     "test": "node --test \"test/*.test.js\"",
     "discord:lab": "node scripts/discord-lab.js",
-    "discord:check": "node scripts/discord-live-check.js"
+    "discord:check": "node scripts/discord-live-check.js",
+    "check": "node scripts/self-check.js"
   },
   "bin": {},
   "engines": {
-    "node": "16.x"
+    "node": ">=22.5.0"
   },
   "devDependencies": {
     "@forscht/eslint-config": "latest",

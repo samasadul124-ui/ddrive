@@ -70,6 +70,17 @@ logged in the boot output - **keep it with your data**: without it those objects
 cannot be decrypted. Set `MASTER_KEY` (or `MASTER_KEY_FILE`) to manage the key
 yourself, which is required when `NODE_ENV=production`.
 
+Not sure it works? Start the server, then in a second terminal run the self-check -
+it uploads real bytes through all three surfaces, reads them back and compares:
+
+```bash
+npm run check          # add: DDRIVE_USER=admin DDRIVE_PASSWORD=… if a password is set
+```
+
+Requires **Node.js 22.5 or newer** (the default database driver uses Node's own
+SQLite). An older runtime stops with a message telling you exactly that instead of
+a stack trace.
+
 Try it: `curl -u admin:<password> http://localhost:3000/api/buckets` — or mount it:
 
 ```bash
@@ -156,7 +167,7 @@ often forbids it; Postgres 13+ needs no extension).
 ## Tests
 
 ```bash
-npm test        # 97 tests, no network, no Docker, no Postgres needed
+npm test        # 98 tests, no network, no Docker, no Postgres needed
 ```
 
 The suite boots the real server in-process. It includes a WebDAV client suite,

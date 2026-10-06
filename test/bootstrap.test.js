@@ -132,3 +132,16 @@ test('the shared password policy is the one the IAM service enforces', async () 
         await t.close()
     }
 })
+
+test('the package declares the Node version the SQLite driver needs', async () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
+    const required = String(pkg.engines?.node || '').replace(/^[^0-9]*/, '')
+    const [major, min] = required.split('.').map(Number)
+    assert.ok(major >= 22, `engines.node must require Node 22+, got "${pkg.engines?.node}"`)
+    if (major === 22) assert.ok(min >= 5, `node:sqlite needs 22.5+, got "${pkg.engines?.node}"`)
+
+    // and the startup preflight must agree with it
+    const entry = fs.readFileSync(path.join(__dirname, '..', 'bin', 'ddrive.js'), 'utf8')
+    assert.match(entry, /REQUIRED_NODE = \[22, 5, 0\]/, 'bin/ddrive.js must fail early on an old Node with advice')
+    assert.match(entry, /node:sqlite|built-in SQLite/, 'the preflight message must name the reason')
+})
