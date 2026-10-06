@@ -332,12 +332,17 @@ const createReplication = (deps = {}) => {
                 })
             } catch (err) {
                 const attempts = Number(task.attempts) + 1
-                const dead = attempts >= maxAttempts
+                // A task whose source bucket is gone can never succeed, however
+                // often it is retried: retire it now instead of backing off.
+                const bucketGone = task.bucketId
+                    ? !(await repo.findOne('bucket', { id: task.bucketId }))
+                    : false
+                const dead = attempts >= maxAttempts || bucketGone
                 // eslint-disable-next-line no-await-in-loop
                 await repo.update('replication_task', { id: task.id }, {
                     status: dead ? 'failed' : 'pending',
                     attempts,
-                    lastError: String(err.message || err).slice(0, 500),
+                    lastError: bucketGone ? 'source bucket was deleted' : String(err.message || err).slice(0, 500),
                     nextAttemptAt: dead ? null : new Date(Date.now() + Math.min(900000, 2000 * (2 ** attempts))),
                 })
                 if (task.objectId) {

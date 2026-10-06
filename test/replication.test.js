@@ -328,3 +328,29 @@ test('deleting a bucket retires its replication tasks instead of retrying them',
     assert.equal(retired.nextAttemptAt, null)
     assert.match(String(retired.lastError), /bucket was deleted/)
 })
+
+test('a task already in flight when its bucket disappears is not retried', async (t) => {
+    const a = await bootNode('az1', 'az1')
+    t.after(() => a.stop())
+    await a.api('POST', '/api/buckets', { name: 'inflight' })
+    const bucket = await a.context.repo.findOne('bucket', { name: 'inflight' })
+    await a.context.objects.putObject({
+        bucket, path: 'x.txt', stream: require('node:stream').Readable.from([Buffer.from('x')]), contentType: 'text/plain', actor: {},
+    })
+    await a.context.replication.createPeer({
+        name: 'down-peer', endpoint: 'http://127.0.0.1:1/s3', accessKeyId: 'AKIADOWN', secret: 'down-secret',
+    })
+    const node = await a.context.objects.getNode(bucket.id, 'x.txt')
+    assert.equal(await a.context.replication.enqueue({ bucket, node, op: 'PUT' }), 1)
+
+    // simulate the race: the worker picked the task up before the bucket was removed
+    const task = await a.context.repo.findOne('replication_task', { bucketId: bucket.id })
+    await a.context.repo.update('replication_task', { id: task.id }, { status: 'in-flight' })
+    await a.api('DELETE', '/api/buckets/inflight?force=true')
+    await a.context.repo.update('replication_task', { id: task.id }, { status: 'pending', nextAttemptAt: new Date() })
+
+    await a.context.replication.processDue()
+    const after = await a.context.repo.findOne('replication_task', { id: task.id })
+    assert.equal(after.status, 'failed', 'an in-flight task for a deleted bucket must be retired, not re-queued')
+    assert.equal(after.nextAttemptAt, null)
+})

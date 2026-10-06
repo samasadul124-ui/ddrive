@@ -111,9 +111,12 @@ const createAudit = (deps = {}) => {
                     const last = await tx.get('select "hash" from "audit_event" order by "seq" desc limit 1')
                     prevHash = last && last.hash ? last.hash : GENESIS_HASH
                 }
-                const payload = { ...base, ts: util.iso(base.ts) }
+                // Hash exactly the shape that will be stored. `undefined` becomes
+                // `null` in the canonical form but is dropped by the database, so
+                // hashing the raw input would produce a chain that cannot verify.
+                const payload = JSON.parse(util.canonicalJson({ ...base, ts: util.iso(base.ts) }))
                 const hash = computeHash(prevHash, payload)
-                const row = await tx.insert('audit_event', { ...base, prevHash, hash })
+                const row = await tx.insert('audit_event', { ...payload, ts: base.ts, prevHash, hash })
                 lastHashCache = hash
                 fanOut({ ...payload, prevHash, hash })
 
@@ -137,7 +140,7 @@ const createAudit = (deps = {}) => {
         let prevHash = GENESIS_HASH
         let checked = 0
         for (const row of rows) {
-            const payload = {
+            const payload = JSON.parse(util.canonicalJson({
                 id: row.id,
                 ts: util.iso(row.ts),
                 actor: row.actor,
@@ -157,7 +160,7 @@ const createAudit = (deps = {}) => {
                 requestId: row.requestId,
                 protocol: row.protocol,
                 detail: row.detail,
-            }
+            }))
             const expected = computeHash(prevHash, payload)
             if (row.prevHash !== prevHash || row.hash !== expected) {
                 return {

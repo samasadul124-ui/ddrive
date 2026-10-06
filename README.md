@@ -147,7 +147,7 @@ often forbids it; Postgres 13+ needs no extension).
 ## Tests
 
 ```bash
-npm test        # 94 tests, no network, no Docker, no Postgres needed
+npm test        # 96 tests, no network, no Docker, no Postgres needed
 ```
 
 The suite boots the real server in-process. It includes a WebDAV client suite,

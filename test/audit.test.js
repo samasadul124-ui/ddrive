@@ -140,3 +140,30 @@ test('append-only JSONL sink mirrors the database', async () => {
         await t.close()
     }
 })
+
+test('records carrying undefined fields still verify (the stored shape is the hashed shape)', async () => {
+    const t = await createTestServer()
+    try {
+        // lifecycle.run and friends pass explicit `undefined` values in detail;
+        // they must hash and store the same shape or the chain can never verify
+        await t.context.audit.record({
+            action: 'lifecycle.run',
+            actor: 'system',
+            actorType: 'system',
+            protocol: 'internal',
+            detail: { rules: 1, ranAt: new Date(), details: undefined, nested: { also: undefined, ok: true } },
+        })
+        await t.context.audit.record({ action: 'plain.entry', actor: 'system', detail: { kept: null } })
+
+        const verified = await t.context.audit.verify()
+        assert.equal(verified.ok, true, `chain must verify, broke at ${JSON.stringify(verified.brokenAt)}`)
+
+        // and it still detects a real edit
+        const rows = await t.context.repo.find('audit_event', {}, { orderBy: [{ column: 'seq', dir: 'asc' }] })
+        await t.context.repo.update('audit_event', { id: rows[0].id }, { detail: { tampered: true } })
+        const after = await t.context.audit.verify()
+        assert.equal(after.ok, false)
+    } finally {
+        await t.close()
+    }
+})
