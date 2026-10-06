@@ -364,8 +364,15 @@ const createReplication = (deps = {}) => {
     const backfill = async (peerName, opts = {}) => {
         const peer = await repo.findOne('replication_peer', { name: peerName })
         if (!peer) throw errors.validation(`Peer ${peerName} does not exist`)
+        // A peer that is scoped to one bucket must never be sent the others.
+        let scopeId = opts.bucketId || null
+        if (!scopeId && peer.bucket) {
+            const scoped = await repo.findOne('bucket', { name: peer.bucket })
+            if (!scoped) return { queued: 0, scanned: 0 }
+            scopeId = scoped.id
+        }
         const where = { type: 'file', deletedAt: null }
-        if (opts.bucketId) where.bucketId = opts.bucketId
+        if (scopeId) where.bucketId = scopeId
         if (peer.prefix) where.path = { startsWith: peer.prefix }
         const nodes = await repo.find('directory', where, { limit: opts.limit || 10000 })
         let queued = 0

@@ -354,3 +354,30 @@ test('a task already in flight when its bucket disappears is not retried', async
     assert.equal(after.status, 'failed', 'an in-flight task for a deleted bucket must be retired, not re-queued')
     assert.equal(after.nextAttemptAt, null)
 })
+
+test('a backfill only queues the buckets the peer is scoped to', async (t) => {
+    const a = await bootNode('az1', 'az1')
+    t.after(() => a.stop())
+    await a.api('POST', '/api/buckets', { name: 'scoped' })
+    await a.api('POST', '/api/buckets', { name: 'other' })
+    for (const [bucket, key] of [['scoped', 'in.txt'], ['other', 'out.txt']]) {
+        const row = await a.context.repo.findOne('bucket', { name: bucket })
+        // eslint-disable-next-line no-await-in-loop
+        await a.context.objects.putObject({
+            bucket: row, path: key, stream: require('node:stream').Readable.from([Buffer.from(key)]), contentType: 'text/plain', actor: {},
+        })
+    }
+    await a.context.replication.createPeer({
+        name: 'scoped-peer', endpoint: 'http://127.0.0.1:1/s3', bucket: 'scoped', accessKeyId: 'AKIASCOPED', secret: 'scoped-secret',
+    })
+
+    const res = await a.context.replication.backfill('scoped-peer')
+    assert.equal(res.queued, 1, 'only the object in the peer bucket may be queued')
+
+    const scoped = await a.context.repo.findOne('bucket', { name: 'scoped' })
+    const other = await a.context.repo.findOne('bucket', { name: 'other' })
+    const tasks = await a.context.repo.find('replication_task', {})
+    assert.equal(tasks.length, 1)
+    assert.equal(tasks[0].bucketId, scoped.id)
+    assert.notEqual(tasks[0].bucketId, other.id)
+})
