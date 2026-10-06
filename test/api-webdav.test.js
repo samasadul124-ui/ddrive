@@ -14,8 +14,8 @@ const dav = (t, method, path, opts = {}) => t.http.inject({
     payload: opts.payload,
 })
 
-const setup = async () => {
-    const t = await createTestServer()
+const setup = async (env = {}) => {
+    const t = await createTestServer(env)
     await t.json('POST', '/api/buckets', { name: 'dav-bucket', versioning: 'enabled' })
 
     return t
@@ -193,8 +193,8 @@ test('DELETE removes files, refuses non-empty collections and recurses with Dept
     }
 })
 
-test('anonymous WebDAV requests are challenged with Basic auth', async () => {
-    const t = await setup()
+test('with AUTH_MODE=basic, anonymous WebDAV requests are challenged with Basic auth', async () => {
+    const t = await setup({ AUTH_MODE: 'basic' })
     try {
         const res = await t.http.inject({ method: 'PROPFIND', url: '/webdav/', headers: { depth: '0' } })
         assert.equal(res.statusCode, 401)

@@ -7,6 +7,13 @@
  *   3. Bearer session     - console SPA (HMAC signed token issued by /api/login)
  *   4. Share link token   - anonymous, read only, scoped to one object
  *
+ * When `security.authMode` is `none` (the default, see src/config/index.js)
+ * credentials are optional: if a request carries none - or carries a bad one -
+ * it is served as the administrator ("open" principal) instead of being
+ * rejected. Supplied credentials are still honoured, so access keys, share
+ * links and multi-user setups keep working, and turning authentication back on
+ * (AUTH_MODE=basic) needs no other change.
+ *
  * The result is always a *principal* + `authorize()` helper, so route handlers
  * never re-implement authorization.
  */
@@ -26,6 +33,46 @@ const createAuth = (context) => {
     const {
         iam, repo, crypto, config, audit, shares,
     } = context
+
+    /**
+     * The principal used when authentication is disabled: the bootstrap
+     * administrator when one exists (so ownership, quotas and audit records
+     * point at a real account), else a synthetic `Allow *` principal.
+     */
+    let openPrincipalCache = null
+    const openPrincipal = async () => {
+        if (openPrincipalCache) return openPrincipalCache
+        const admin = await repo.findOne('user', { username: config.security.bootstrap.username }).catch(() => null)
+            || await repo.findOne('user', { isAdmin: true }).catch(() => null)
+        if (admin && admin.status === 'active') {
+            const principal = await iam.buildPrincipal(admin, { type: 'user' })
+            principal.authType = 'none'
+            principal.authentication = 'disabled'
+            openPrincipalCache = principal
+
+            return principal
+        }
+        // no account yet (first boot): allow everything explicitly
+        openPrincipalCache = {
+            id: null,
+            name: 'open',
+            displayName: 'Open access',
+            type: 'user',
+            isAdmin: true,
+            roles: [],
+            documents: [{
+                Version: '2012-10-17',
+                Statement: [{ Effect: 'Allow', Action: ['*'], Resource: ['*'] }],
+            }],
+            authType: 'none',
+            authentication: 'disabled',
+        }
+
+        return openPrincipalCache
+    }
+
+    /** True when a request may be served without credentials. */
+    const authDisabled = () => config.security.authMode === 'none';
 
     /** Resolve the principal attached to a request, or null for anonymous. */
     const principalFor = async (req) => {
@@ -123,20 +170,22 @@ const createAuth = (context) => {
         }
 
         // ---------------------------------------------------------- anonymous
-        const principal = iam.anonymousPrincipal()
+        if (authDisabled()) return openPrincipal()
 
-        return principal
+        return iam.anonymousPrincipal()
     }
 
     /** Authenticate or throw 401 with the right challenge for the protocol. */
     const requirePrincipal = async (req, reply) => {
         const principal = await principalFor(req).catch((err) => {
-            if (err && err.code === 'AccessDenied') return null
+            // a bad credential is not a fatal error when none is required
+            if (err && err.code === 'AccessDenied') return authDisabled() ? openPrincipal() : null
 
             throw err
         })
         if (principal && principal.type !== 'anonymous') return principal
         if (principal && (principal.share || config.security.publicAccess)) return principal
+        if (authDisabled()) return openPrincipal()
 
         const err = errors.accessDenied('Authentication required')
         if (req.ddrive?.protocol === 's3') {
@@ -205,9 +254,15 @@ const createAuth = (context) => {
         return { token, principal, user }
     }
 
+    /** Drop the cached open principal (after a user change or a re-seed). */
+    const resetOpenPrincipal = () => { openPrincipalCache = null }
+
     return {
         principalFor,
         requirePrincipal,
+        openPrincipal,
+        authDisabled,
+        resetOpenPrincipal,
         authorize,
         guard,
         issueSession,

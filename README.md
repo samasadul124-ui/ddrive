@@ -12,25 +12,36 @@ npm install
 npm start
 ```
 
-That is the whole setup on this branch. Defaults: SQLite database
-(`data/ddrive.sqlite`), local object store (`data/`), HTTP server on
-`http://localhost:3000`, user `admin`.
+That is the whole setup on this branch. **There is no login and no password:**
+SQLite database (`data/ddrive.sqlite`), local object store (`data/`), HTTP
+server on `http://localhost:3000`, and every request is served as the
+administrator. Open <http://localhost:3000> and start uploading.
 
-On the first boot DDrive prints the administrator password it generated::
+> ⚠️ **Authentication is disabled by default.** Anyone who can reach the port
+> can read, write and delete everything, and change settings. That is fine on
+> your own machine or a trusted LAN. If the port is reachable from the internet,
+> set up a password (below) or bind `HOST=127.0.0.1` and keep it local. DDrive
+> prints a warning at every boot while authentication is off.
+
+### Turning the password back on
+
+```bash
+AUTH_MODE=basic BOOTSTRAP_ADMIN_PASSWORD='Some-Good-Passw0rd' npm start
+```
+
+The panel, WebDAV and the S3 API then require credentials (browser prompt for
+the panel, Basic auth for WebDAV, SigV4 or an access key for S3). On the first
+boot with `AUTH_MODE=basic` and no password set, DDrive generates one and prints
+it:
 
 ```
 Created administrator "admin" with generated password: <password>
 ```
 
-Copy it from the console, log in, change it in the console (the account is
-flagged `mustChangePassword`), or choose your own up front:
-
-```bash
-BOOTSTRAP_ADMIN_PASSWORD='Some-Good-Passw0rd' npm start
-```
-
 The password policy (same one the API enforces) is at least 8 characters with
 lower case, upper case and a digit, and it may not contain the username.
+A legacy `AUTH=user:password` line also turns authentication on, because setting
+a credential pair is an explicit request to be asked for it.
 
 | Surface | URL | Notes |
 | --- | --- | --- |
@@ -39,6 +50,9 @@ lower case, upper case and a digit, and it may not contain the username.
 | **WebDAV** | `http://localhost:3000/webdav` | mountable Class 1/2/3 server (`DAV: 1, 2, 3`) |
 | S3 API | `http://localhost:3000/s3` | SigV4, path + virtual-host style, multipart |
 | Health / metrics | `/healthz`, `/readyz`, `/metrics` | liveness, readiness, Prometheus |
+
+Every surface answers without credentials by default; `AUTH_MODE=basic` makes
+all of them require a password.
 
 Try it: `curl -u admin:<password> http://localhost:3000/api/buckets` — or mount it:
 
@@ -86,7 +100,7 @@ Server listening at http://0.0.0.0:3000
 | Category | Must-have (done) | Advanced (done) |
 | --- | --- | --- |
 | **Durability** | Multi-AZ replication between nodes (`src/core/replication.js`, peers push objects, deletes and metadata with HMAC-signed requests) | Cross-region peers + prefix-scoped links, per-peer backlog/health, `POST /api/admin/replication/:name/test`, S3-compatible peers |
-| **Security** | AES-256-GCM envelope encryption per object (per-object DEK wrapped by the master key) + full IAM (users, groups, roles, policies, access keys, bucket policies) | Object Lock + legal hold (retention modes, server-side enforcement), key hierarchy with `MASTER_KEY_FILE` / KMS-style `keyId` + wrapping key rotation hooks |
+| **Security** | AES-256-GCM envelope encryption per object (per-object DEK wrapped by the master key) + full IAM (users, groups, roles, policies, access keys, bucket policies). Request authentication is off by default (`AUTH_MODE`) - the encryption and the IAM engine are unaffected by that switch | Object Lock + legal hold (retention modes, server-side enforcement), key hierarchy with `MASTER_KEY_FILE` / KMS-style `keyId` + wrapping key rotation hooks |
 | **Management** | Versioning (version ids, delete markers, restore) and lifecycle rules (expiry, non-current expiry, abort multipart, tier transitions) | AI/rule-based auto-tagging (`auto_tag_rule`, prefix+regex+sweep) with tag search, intelligent tiering policies (`tiering_policy`, hot/cold backends, migration worker) |
 | **Access** | REST API + SDK module, WebDAV, S3 API, shares (presigned-style links), multipart upload, ranged downloads | Event-driven delivery (`event_target`, `event_delivery`, retries, dead letters) + serverless-style webhook triggers |
 | **Compliance** | Tamper-evident encryption audit log (hash-chained `audit_event`, `audit.verify()`, compliance queries) | Retention/legal-hold enforcement + auditor role; certification work is deployment-specific (see "Compliance notes") |
@@ -126,7 +140,7 @@ often forbids it; Postgres 13+ needs no extension).
 ## Tests
 
 ```bash
-npm test        # 84 tests, no network, no Docker, no Postgres needed
+npm test        # 89 tests, no network, no Docker, no Postgres needed
 ```
 
 The suite boots the real server in-process. It includes a WebDAV client suite,
@@ -143,6 +157,9 @@ Discord would refuse fails in the suite instead of only in production.
 DB_DRIVER=sqlite|postgres      # defaults to postgres when DATABASE_URL is set
 SQLITE_FILE=./data/ddrive.sqlite
 DATA_DIR=./data
+AUTH_MODE=none|basic           # none (default) = no login at all
+BOOTSTRAP_ADMIN_USER=admin     # the account used when auth is off
+BOOTSTRAP_ADMIN_PASSWORD=      # only with AUTH_MODE=basic
 STORAGE_DRIVER=local|s3|discord|memory
 CHUNK_SIZE=10420224            # clamps to 10 MiB minus overhead on Discord
 WEBHOOKS=url1,url2             # required when any backend is discord

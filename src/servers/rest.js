@@ -202,6 +202,8 @@ const createRestServer = (context, deps) => {
         user: principal,
         buckets: (await buckets.list()).map((b) => b.name),
         capabilities: {
+            // 'none' means no credentials are required (see AUTH_MODE)
+            auth: { mode: config.security.authMode, required: config.security.authenticate },
             publicAccess: config.security.publicAccess,
             webdav: config.servers.webdav.enabled,
             s3: config.servers.s3.enabled,

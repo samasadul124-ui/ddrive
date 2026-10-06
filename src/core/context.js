@@ -149,6 +149,7 @@ const createContext = (config, opts = {}) => {
         // first administrator
         const users = await repo.count('user')
         if (!users) {
+            const authenticate = config.security.authMode === 'basic'
             const configured = config.security.bootstrap.password
             // A generated password is only useful if it is the string we log:
             // generate one that already satisfies the policy instead of
@@ -160,10 +161,15 @@ const createContext = (config, opts = {}) => {
                 password,
                 isAdmin: true,
                 displayName: 'Administrator',
-                mustChangePassword: !configured,
+                mustChangePassword: authenticate && !configured,
             })
             await iam.setUserRoles(user.id, ['Administrators'])
-            if (!config.security.bootstrap.password) {
+            if (!authenticate) {
+                // no password is ever asked for, so none is printed either - the
+                // account exists to own objects and to appear in the audit log
+                logger.info?.(`Authentication is disabled: the "${user.username}" account is used for every request. `
+                    + 'Set AUTH_MODE=basic (and BOOTSTRAP_ADMIN_PASSWORD) to require a password.')
+            } else if (!configured) {
                 logger.warn?.(`Created administrator "${user.username}" with generated password: ${password}`)
                 logger.warn?.('Set BOOTSTRAP_ADMIN_PASSWORD to control this password, then change it in the console.')
             }

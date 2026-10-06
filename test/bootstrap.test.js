@@ -34,6 +34,9 @@ const bootInstall = async (env = {}) => {
         STORAGE_DRIVER: 'local',
         LOG_LEVEL: 'silent',
         PORT: '0',
+        // a generated password only exists when a password is required; the
+        // default (AUTH_MODE=none) never asks for one - see test/no-auth.test.js
+        AUTH_MODE: 'basic',
         ...env,
     }, { cwd: dir, validate: true })
     const context = createContext(config, { logger })

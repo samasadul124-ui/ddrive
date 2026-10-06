@@ -9,8 +9,8 @@ const assert = require('node:assert/strict')
 const { createTestServer, createAccessKey, s3 } = require('./helpers')
 const sigv4 = require('../src/lib/sigv4')
 
-const setup = async () => {
-    const t = await createTestServer()
+const setup = async (env = {}) => {
+    const t = await createTestServer(env)
     t.credentials = await createAccessKey(t)
 
     return t
@@ -51,8 +51,8 @@ test('signed requests create a bucket, store and read an object', async () => {
     }
 })
 
-test('unsigned and badly signed requests are rejected', async () => {
-    const t = await setup()
+test('with AUTH_MODE=basic, unsigned and badly signed requests are rejected', async () => {
+    const t = await setup({ AUTH_MODE: 'basic' })
     try {
         const anonymous = await t.http.inject({ method: 'PUT', url: '/s3/denied-bucket' })
         assert.equal(anonymous.statusCode, 403)

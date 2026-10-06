@@ -26,6 +26,7 @@ const storageSummary = (config) => {
         `chunk=${humanBytes(s.chunkSize)}`,
         `data=${s.driver === 'discord' ? `${s.webhooks.length} webhook(s)` : s.directory}`,
         `db=${config.database.driver}`,
+        `auth=${config.security.authMode}`,
     ]
     if (tiers.length) parts.push(`tiers=${tiers.join(',')}`)
 
@@ -48,6 +49,16 @@ const main = async () => {
         console.warn(`[ddrive] CHUNK_SIZE=${adj.requested} is larger than the ${humanBytes(adj.limit)} limit of the `
             + `${adj.drivers.join('/')} backend; using ${humanBytes(adj.applied)}. `
             + 'Uploads larger than the limit are rejected by the backend.')
+    }
+    if (config.security.authenticate) {
+        // eslint-disable-next-line no-console
+        console.log('[ddrive] authentication is ON: the panel, WebDAV and S3 require credentials '
+            + `(AUTH_MODE=basic, user "${config.security.bootstrap.username}")`)
+    } else {
+        // eslint-disable-next-line no-console
+        console.warn('[ddrive] AUTHENTICATION IS DISABLED: anyone who can reach this port has full access '
+            + 'to every bucket, object and setting. If this machine is reachable from the internet, '
+            + 'set AUTH_MODE=basic and a password, or bind HOST=127.0.0.1 and use a firewall.')
     }
     if (config.storage.driver === 'discord') {
         // eslint-disable-next-line no-console

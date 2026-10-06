@@ -129,10 +129,38 @@ const loadConfig = (env = process.env, opts = {}) => {
     }
 
     const [authUser, authPass] = String(env.AUTH || '').split(':')
+
+    // ------------------------------------------------------------------
+    // Authentication
+    //
+    // DDrive ships with authentication *disabled*: the panel, REST API,
+    // WebDAV and S3 answer without credentials, so a personal or LAN
+    // deployment needs no password at all. Set AUTH_MODE=basic to require
+    // one; a legacy AUTH=user:password implies it, because setting a
+    // credential pair is an unambiguous request to be asked for it.
+    // ------------------------------------------------------------------
+    const requestedAuthMode = String(env.AUTH_MODE || '').toLowerCase()
+    const disableAuthFlag = bool(env.DISABLE_AUTH, false) || bool(env.AUTH_DISABLED, false)
+    if (requestedAuthMode && !['none', 'basic', 'off', 'open', 'required'].includes(requestedAuthMode)) {
+        throw new Error(`Invalid AUTH_MODE "${env.AUTH_MODE}": expected none or basic`)
+    }
+    let authMode
+    if (disableAuthFlag || ['none', 'off', 'open'].includes(requestedAuthMode)) authMode = 'none'
+    else if (['basic', 'required'].includes(requestedAuthMode)) authMode = 'basic'
+    else if (env.AUTH) authMode = 'basic'
+    else authMode = 'none'
+    if (authMode === 'basic' && !env.AUTH && !env.BOOTSTRAP_ADMIN_PASSWORD && !env.BOOTSTRAP_ADMIN_USER) {
+        // basic auth with no way in would lock the operator out on first boot;
+        // the bootstrap admin gets a generated password that is printed once.
+        // eslint-disable-next-line no-console
+        console.warn('[ddrive] AUTH_MODE=basic without BOOTSTRAP_ADMIN_PASSWORD: a password will be generated and printed on first boot');
+    }
     const masterKey = env.MASTER_KEY || env.ENCRYPTION_KEY || ''
     const kmsEndpoint = env.KMS_ENDPOINT || ''
 
     const security = {
+        authMode,
+        authenticate: authMode === 'basic',
         masterKey,
         masterKeyFile: readSecretFile(env.MASTER_KEY_FILE),
         algorithm: (env.ENCRYPTION_ALGORITHM || 'aes-256-gcm').toLowerCase(),
@@ -242,8 +270,8 @@ const validate = (config) => {
         if (!config.security.masterKey && !config.security.masterKeyFile && !config.security.kmsEndpoint) {
             problems.push('MASTER_KEY (or KMS_ENDPOINT) is required in production: data would be stored unencrypted')
         }
-        if (!config.security.bootstrap.password && !process.env.BOOTSTRAP_ADMIN_PASSWORD) {
-            problems.push('BOOTSTRAP_ADMIN_PASSWORD is required in production for the initial administrator')
+        if (config.security.authenticate && !config.security.bootstrap.password && !process.env.BOOTSTRAP_ADMIN_PASSWORD) {
+            problems.push('BOOTSTRAP_ADMIN_PASSWORD is required in production when AUTH_MODE=basic')
         }
     }
     // An explicitly configured bootstrap password must be usable as-is: the

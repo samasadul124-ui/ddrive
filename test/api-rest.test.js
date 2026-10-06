@@ -227,13 +227,18 @@ test('admin overview, settings, metrics and health endpoints respond', async () 
     }
 })
 
-test('unauthenticated requests to the API are rejected', async () => {
-    const t = await setup()
+test('with AUTH_MODE=basic, unauthenticated requests to the API are rejected', async () => {
+    // the default is AUTH_MODE=none (no credentials required, see
+    // test/no-auth.test.js); this pins the behaviour when a password is asked for
+    const t = await createTestServer({ AUTH_MODE: 'basic' })
     try {
         for (const url of ['/api/buckets', '/api/directories', '/api/admin/overview']) {
             const res = await t.http.inject({ method: 'GET', url })
             assert.equal(res.statusCode, 401, `${url} must require auth`)
+            assert.match(String(res.headers['www-authenticate'] || ''), /Basic/i, `${url} must send the Basic challenge`)
         }
+        // ...and the credentials from config are accepted
+        assert.equal((await t.json('GET', '/api/buckets')).statusCode, 200)
     } finally {
         await t.close()
     }
