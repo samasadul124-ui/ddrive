@@ -201,3 +201,41 @@ test('object tagging and versioning round-trip through the S3 API', async () => 
         await t.close()
     }
 })
+
+test('an object upload into a missing bucket fails instead of vanishing', async () => {
+    // regression: PUT /bucket/key on a bucket that does not exist used to be
+    // handled as a bucket creation - it returned 200 and stored nothing, so
+    // `aws s3 cp file s3://new-bucket/key` looked successful while losing the
+    // file. S3 answers NoSuchBucket and so must we.
+    const t = await setup()
+    try {
+        const missing = await s3(t, { method: 'PUT', path: '/not-there/file.txt', payload: 'must not be swallowed' })
+        assert.equal(missing.statusCode, 404, missing.body)
+        assert.match(missing.body, /<Code>NoSuchBucket<\/Code>/)
+        assert.equal((await t.json('GET', '/api/buckets')).statusCode, 200)
+        assert.equal(t.body(await t.json('GET', '/api/buckets')).buckets.some((b) => b.name === 'not-there'), false, 'a failed upload must not create the bucket')
+
+        // creating the bucket explicitly is the documented way, and then the
+        // same upload stores the object
+        const created = await s3(t, { method: 'PUT', path: '/proper-bucket' })
+        assert.equal(created.statusCode, 200)
+        const put = await s3(t, { method: 'PUT', path: '/proper-bucket/file.txt', payload: 'stored properly' })
+        assert.ok([200, 201].includes(put.statusCode), put.body)
+        const got = await s3(t, { method: 'GET', path: '/proper-bucket/file.txt' })
+        assert.equal(got.statusCode, 200)
+        assert.equal(got.body, 'stored properly')
+
+        // a streaming (aws-chunked) upload into a missing bucket is rejected too
+        // (bucket existence is checked before the payload is decoded)
+        const chunked = await s3(t, {
+            method: 'PUT',
+            path: '/also-missing/chunked.txt',
+            payload: 'x',
+            headers: { 'x-amz-content-sha256': 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD' },
+        })
+        assert.equal(chunked.statusCode, 404, chunked.body)
+        assert.match(chunked.body, /<Code>NoSuchBucket<\/Code>/)
+    } finally {
+        await t.close()
+    }
+})

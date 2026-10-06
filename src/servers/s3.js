@@ -877,7 +877,12 @@ const createS3Server = (context, deps = {}) => {
             }
             const bucketExists = await buckets.exists(bucketName).catch(() => false)
             if (!bucketExists) {
-                if (req.method === 'PUT') {
+                // `PUT /bucket` creates the bucket (S3 semantics). `PUT
+                // /bucket/key` must NOT be mistaken for that: it is an object
+                // upload, and auto-creating the bucket here would answer 200
+                // while storing nothing - a silent data loss that looks like a
+                // successful upload to every S3 client.
+                if (req.method === 'PUT' && !key) {
                     await auth.authorize(req, principal, 's3:CreateBucket', { bucket: bucketName })
                     const bucket = await buckets.create(bucketName, {
                         region: region(),
