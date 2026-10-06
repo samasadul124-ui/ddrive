@@ -149,15 +149,18 @@ const createContext = (config, opts = {}) => {
         // first administrator
         const users = await repo.count('user')
         if (!users) {
-            const password = config.security.bootstrap.password || util.randomToken(12)
+            const configured = config.security.bootstrap.password
+            // A generated password is only useful if it is the string we log:
+            // generate one that already satisfies the policy instead of
+            // appending a suffix after logging (which locked first-run installs
+            // out for ~10% of random draws).
+            const password = configured || util.strongPassword(12, config.security.bootstrap.username)
             const user = await iam.createUser({
                 username: config.security.bootstrap.username,
-                password: password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password)
-                    ? password
-                    : `${password}Aa1`,
+                password,
                 isAdmin: true,
                 displayName: 'Administrator',
-                mustChangePassword: !config.security.bootstrap.password,
+                mustChangePassword: !configured,
             })
             await iam.setUserRoles(user.id, ['Administrators'])
             if (!config.security.bootstrap.password) {

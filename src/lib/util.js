@@ -27,6 +27,45 @@ const sha256Hmac = hmacSha256
 const randomToken = (bytes = 24) => crypto.randomBytes(bytes).toString('base64url')
 const randomHex = (bytes = 16) => crypto.randomBytes(bytes).toString('hex')
 
+/**
+ * Single source of truth for the administrator/user password policy.
+ *
+ * Returns an explanation, or null when the password is acceptable. It lives
+ * here (and not only in the IAM service) because the bootstrap password in
+ * src/config is validated before any service exists - and because a generated
+ * password must satisfy exactly the same rules as a typed one.
+ */
+const passwordPolicyError = (password, username) => {
+    const value = String(password || '')
+    if (value.length < 8) return 'Password must be at least 8 characters long'
+    if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/[0-9]/.test(value)) {
+        return 'Password must contain lower case, upper case and numeric characters'
+    }
+    if (username && value.toLowerCase().includes(String(username).toLowerCase())) {
+        return 'Password must not contain the username'
+    }
+
+    return null
+}
+
+/**
+ * A random password that satisfies `passwordPolicyError`.
+ *
+ * The candidate is checked before it is returned, because the caller logs this
+ * value for the operator: a "generated" password that the policy then silently
+ * modified would lock the first administrator out of a fresh install.
+ */
+const strongPassword = (bytes = 12, username = '') => {
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
+        // base64url draws lower case, digits and (often) upper case; the second
+        // shape is a guaranteed-valid fallback
+        const candidate = attempt % 2 === 0 ? randomToken(bytes) : `${randomHex(bytes)}-Aa1x9`
+        if (!passwordPolicyError(candidate, username)) return candidate
+    }
+
+    throw new Error('could not generate a password that satisfies the password policy')
+}
+
 const timingSafeEqual = (a, b) => {
     const bufA = Buffer.from(String(a))
     const bufB = Buffer.from(String(b))
@@ -367,6 +406,8 @@ module.exports = {
     sha256Hmac,
     randomToken,
     randomHex,
+    passwordPolicyError,
+    strongPassword,
     timingSafeEqual,
     canonicalJson,
     etag,

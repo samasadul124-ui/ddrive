@@ -1,5 +1,136 @@
 <h1 align="center" style="font-size: 60px"> DDRIVE </h1>
 
+> **This branch (`arena/2ed54c7d-ddrive`) is DDrive 2.0 — a complete cloud storage
+> platform.** The repository below still documents the original Discord-backed
+> layer; everything in this section is the current system, and it runs with
+> **no Discord, no Postgres and no Docker** if you want it to.
+
+## 60-second quickstart (SQLite + local disk)
+
+```bash
+npm install
+npm start
+```
+
+That is the whole setup on this branch. Defaults: SQLite database
+(`data/ddrive.sqlite`), local object store (`data/`), HTTP server on
+`http://localhost:3000`, user `admin`.
+
+On the first boot DDrive prints the administrator password it generated::
+
+```
+Created administrator "admin" with generated password: <password>
+```
+
+Copy it from the console, log in, change it in the console (the account is
+flagged `mustChangePassword`), or choose your own up front:
+
+```bash
+BOOTSTRAP_ADMIN_PASSWORD='Some-Good-Passw0rd' npm start
+```
+
+The password policy (same one the API enforces) is at least 8 characters with
+lower case, upper case and a digit, and it may not contain the username.
+
+| Surface | URL | Notes |
+| --- | --- | --- |
+| Web console | `http://localhost:3000/` | buckets, browse, upload, versions, shares, IAM, audit |
+| REST API | `http://localhost:3000/api` | JSON API used by the console and SDK |
+| **WebDAV** | `http://localhost:3000/webdav` | mountable Class 1/2/3 server (`DAV: 1, 2, 3`) |
+| S3 API | `http://localhost:3000/s3` | SigV4, path + virtual-host style, multipart |
+| Health / metrics | `/healthz`, `/readyz`, `/metrics` | liveness, readiness, Prometheus |
+
+Try it: `curl -u admin:<password> http://localhost:3000/api/buckets` — or mount it:
+
+```bash
+# macOS Finder: Go > Connect to Server... ; Linux:
+sudo mount -t davfs http://localhost:3000/webdav /mnt/ddrive
+# Windows: map a network drive to http://localhost:3000/webdav
+```
+
+## What is implemented
+
+| Category | Must-have (done) | Advanced (done) |
+| --- | --- | --- |
+| **Durability** | Multi-AZ replication between nodes (`src/core/replication.js`, peers push objects, deletes and metadata with HMAC-signed requests) | Cross-region peers + prefix-scoped links, per-peer backlog/health, `POST /api/admin/replication/:name/test`, S3-compatible peers |
+| **Security** | AES-256-GCM envelope encryption per object (per-object DEK wrapped by the master key) + full IAM (users, groups, roles, policies, access keys, bucket policies) | Object Lock + legal hold (retention modes, server-side enforcement), key hierarchy with `MASTER_KEY_FILE` / KMS-style `keyId` + wrapping key rotation hooks |
+| **Management** | Versioning (version ids, delete markers, restore) and lifecycle rules (expiry, non-current expiry, abort multipart, tier transitions) | AI/rule-based auto-tagging (`auto_tag_rule`, prefix+regex+sweep) with tag search, intelligent tiering policies (`tiering_policy`, hot/cold backends, migration worker) |
+| **Access** | REST API + SDK module, WebDAV, S3 API, shares (presigned-style links), multipart upload, ranged downloads | Event-driven delivery (`event_target`, `event_delivery`, retries, dead letters) + serverless-style webhook triggers |
+| **Compliance** | Tamper-evident encryption audit log (hash-chained `audit_event`, `audit.verify()`, compliance queries) | Retention/legal-hold enforcement + auditor role; certification work is deployment-specific (see "Compliance notes") |
+
+Also present: quota enforcement, metrics, structure-aware storage tiers
+(`local`, `memory`, `s3`, `discord`), and the original Discord chunked storage
+(`STORAGE_DRIVER=discord` + `WEBHOOKS=...`).
+
+## Two deployment modes
+
+**Single node (default)** — SQLite + local disk. Nothing external required.
+Data lives in `DATA_DIR`; the whole database is one file you can copy, and the
+admin password is generated on first boot (see above).
+
+**Production** — Postgres + (local disk | S3 | Discord) storage:
+
+```bash
+DB_DRIVER=postgres \
+DATABASE_URL=postgres://user:pass@host:5432/ddrive \
+MASTER_KEY="$(openssl rand -hex 32)" \
+BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 18)" \
+STORAGE_DRIVER=s3 S3_BUCKET=my-ddrive S3_REGION=eu-west-1 \
+npm start
+```
+
+The schema is created/upgraded automatically on boot
+(`migrations/20260101000000_2.0.0_baseline.js`, generated from the single
+declarative schema in `src/db/schema.js`), so `npm start` is still the only
+command. `npm run migration:latest` does the same thing manually.
+
+*Upgrading a pre-2.0 database:* the baseline migration detects the old
+`directory`/`block` tables, copies their rows into `legacy_directory` /
+`legacy_block`, and only then removes them. Nothing is dropped without a copy.
+`CREATE EXTENSION pgcrypto` is attempted but not required (managed Postgres
+often forbids it; Postgres 13+ needs no extension).
+
+## Tests
+
+```bash
+npm test        # 74 tests, no network, no Docker, no Postgres needed
+```
+
+The suite boots the real server in-process. It includes a WebDAV client suite,
+SigV4 signing tests, tamper-evidence checks for the audit chain, Discord storage
+against a local stub, **multi-AZ replication between two live nodes**, and
+**the whole application running on the Postgres driver** (via `pg-mem`, so the
+production path is covered in CI without a database server).
+
+## Configuration reference (2.0 additions)
+
+```shell
+DB_DRIVER=sqlite|postgres      # defaults to postgres when DATABASE_URL is set
+SQLITE_FILE=./data/ddrive.sqlite
+DATA_DIR=./data
+STORAGE_DRIVER=local|s3|discord|memory
+MASTER_KEY=<32-byte hex>       # envelope encryption; MASTER_KEY_FILE also supported
+BOOTSTRAP_ADMIN_USER=admin
+BOOTSTRAP_ADMIN_PASSWORD=<set before first boot>
+NODE_NAME=az1 NODE_REGION=eu-west-1a   # used by replication/node identity
+WEBDAV_PATH=/webdav  S3_PATH=/s3  REST_PATH=/api
+WEBHOOKS=url1,url2             # only for STORAGE_DRIVER=discord
+```
+
+See `config/.env_sample` for the original Discord-mode variables.
+
+## Compliance notes
+
+Encryption and its audit trail are implemented (per-object encryption, wrapped
+keys, hash-chained audit records, retention/legal hold, auditor role, metrics).
+Certification (SOC 2 / ISO 27001 / HIPAA paperwork) is an organisational
+process, not code — the technical controls it audits are the ones listed above.
+
+---
+
+### Original DDrive documentation (Discord-backed storage layer)
+
+
 <p align="center"><strong> Turn Discord into a datastore that can manage and store your files. </strong></p>
 <p align="center">
     <a href="https://discord.gg/3TCZRYafhW">

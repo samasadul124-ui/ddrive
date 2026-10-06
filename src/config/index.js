@@ -8,6 +8,7 @@
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const util = require('../lib/util')
 
 const bool = (value, fallback) => {
     if (value === undefined || value === null || value === '') return fallback
@@ -212,6 +213,15 @@ const validate = (config) => {
         if (!config.security.bootstrap.password && !process.env.BOOTSTRAP_ADMIN_PASSWORD) {
             problems.push('BOOTSTRAP_ADMIN_PASSWORD is required in production for the initial administrator')
         }
+    }
+    // An explicitly configured bootstrap password must be usable as-is: the
+    // bootstrap path used to append a suffix when the policy rejected it, which
+    // silently changed the operator's password. Fail loudly instead.
+    const bootstrapProblem = config.security.bootstrap.password
+        ? util.passwordPolicyError(config.security.bootstrap.password, config.security.bootstrap.username)
+        : null
+    if (bootstrapProblem) {
+        problems.push(`BOOTSTRAP_ADMIN_PASSWORD (or AUTH) is not acceptable: ${bootstrapProblem}`)
     }
     if (problems.length) throw new Error(`Invalid configuration:\n - ${problems.join('\n - ')}`)
 

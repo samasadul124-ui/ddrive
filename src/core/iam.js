@@ -134,14 +134,9 @@ const createIam = (deps = {}) => {
     const hashPassword = (password) => crypto.hashPassword(String(password))
 
     const assertPassword = (password, username) => {
-        const value = String(password || '')
-        if (value.length < 8) throw errors.validation('Password must be at least 8 characters long')
-        if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/[0-9]/.test(value)) {
-            throw errors.validation('Password must contain lower case, upper case and numeric characters')
-        }
-        if (username && value.toLowerCase().includes(String(username).toLowerCase())) {
-            throw errors.validation('Password must not contain the username')
-        }
+        // identical rules to the bootstrap path (src/lib/util.passwordPolicyError)
+        const problem = util.passwordPolicyError(password, username)
+        if (problem) throw errors.validation(problem)
     }
 
     const createUser = async (input) => {
