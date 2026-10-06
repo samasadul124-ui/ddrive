@@ -54,6 +54,13 @@ a credential pair is an explicit request to be asked for it.
 Every surface answers without credentials by default; `AUTH_MODE=basic` makes
 all of them require a password.
 
+**Encryption is on by default too.** On the first boot DDrive generates a master
+key at `DATA_DIR/master.key` (mode 0600) and uses it to encrypt object bytes and
+secret material at rest (access keys, replication credentials). The key file is
+logged in the boot output - **keep it with your data**: without it those objects
+cannot be decrypted. Set `MASTER_KEY` (or `MASTER_KEY_FILE`) to manage the key
+yourself, which is required when `NODE_ENV=production`.
+
 Try it: `curl -u admin:<password> http://localhost:3000/api/buckets` — or mount it:
 
 ```bash
@@ -140,7 +147,7 @@ often forbids it; Postgres 13+ needs no extension).
 ## Tests
 
 ```bash
-npm test        # 89 tests, no network, no Docker, no Postgres needed
+npm test        # 91 tests, no network, no Docker, no Postgres needed
 ```
 
 The suite boots the real server in-process. It includes a WebDAV client suite,
@@ -160,6 +167,10 @@ DATA_DIR=./data
 AUTH_MODE=none|basic           # none (default) = no login at all
 BOOTSTRAP_ADMIN_USER=admin     # the account used when auth is off
 BOOTSTRAP_ADMIN_PASSWORD=      # only with AUTH_MODE=basic
+MASTER_KEY=<32-byte hex>       # optional: without it a key is generated on first
+                               # boot at DATA_DIR/master.key (0600) and reused.
+                               # Back that file up: it decrypts your data.
+MASTER_KEY_AUTOGENERATE=true   # set false to require an explicit MASTER_KEY
 STORAGE_DRIVER=local|s3|discord|memory
 CHUNK_SIZE=10420224            # clamps to 10 MiB minus overhead on Discord
 WEBHOOKS=url1,url2             # required when any backend is discord

@@ -9,6 +9,17 @@ const fs = require('fs')
 const path = require('path')
 const dotenv = require('dotenv')
 
+// Node prints an ExperimentalWarning for the embedded SQLite driver on every
+// boot. It is not actionable here (SQLite is the zero-dependency default, and
+// the alternative is running Postgres), so it is filtered out of the startup
+// output - every other warning is still printed exactly as Node produced it.
+process.removeAllListeners('warning')
+process.on('warning', (warning) => {
+    if (warning.name === 'ExperimentalWarning' && /SQLite/i.test(warning.message || '')) return
+    // eslint-disable-next-line no-console
+    console.warn(`${warning.name}: ${warning.message}`)
+})
+
 const { loadConfig } = require('../src/config')
 const { createHttpServer } = require('../src')
 const { humanBytes } = require('../src/lib/limits')
@@ -67,6 +78,18 @@ const main = async () => {
     }
 
     await server.start()
+
+    const { port, host } = config.servers
+    const display = host === '0.0.0.0' || host === '::' ? 'localhost' : host
+    const where = `http://${display}:${port}`
+    // eslint-disable-next-line no-console
+    console.log('')
+    // eslint-disable-next-line no-console
+    console.log(`[ddrive] Ready. Open ${where} in your browser and drop a file on the page.`)
+    // eslint-disable-next-line no-console
+    console.log(`[ddrive] WebDAV: ${where}/webdav   S3 API: ${where}/s3   Stop: Ctrl+C`)
+    // eslint-disable-next-line no-console
+    console.log('')
 
     const shutdown = async (signal) => {
         server.fastify.log.info(`received ${signal}, shutting down`)

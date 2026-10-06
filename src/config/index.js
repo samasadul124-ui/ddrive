@@ -163,6 +163,9 @@ const loadConfig = (env = process.env, opts = {}) => {
         authenticate: authMode === 'basic',
         masterKey,
         masterKeyFile: readSecretFile(env.MASTER_KEY_FILE),
+        // where an auto-generated key is written when nothing is configured
+        masterKeyFilePath: env.MASTER_KEY_FILE ? absolute(env.MASTER_KEY_FILE, cwd) : path.join(dataDir, 'master.key'),
+        autoGenerateMasterKey: bool(env.MASTER_KEY_AUTOGENERATE, nodeEnv !== 'production'),
         algorithm: (env.ENCRYPTION_ALGORITHM || 'aes-256-gcm').toLowerCase(),
         kmsEndpoint,
         kmsToken: env.KMS_TOKEN || '',
