@@ -21,7 +21,9 @@
     "migration:up": "knex migrate:up",
     "migration:down": "knex migrate:down",
     "migration:make": "knex migrate:make",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "discord:lab": "node scripts/discord-lab.js",
+    "discord:check": "node scripts/discord-live-check.js"
   },
   "bin": {},
   "engines": {
