@@ -303,3 +303,28 @@ test('replication is idempotent: the same object is not stored twice', async (t)
     const after = await b.context.repo.count('object_version', { bucketId: bucket.id, path: 'once.txt' })
     assert.equal(after, before, 'no extra version may be created')
 })
+
+test('deleting a bucket retires its replication tasks instead of retrying them', async (t) => {
+    const a = await bootNode('az1', 'az1')
+    t.after(() => a.stop())
+    await a.api('POST', '/api/buckets', { name: 'doomed' })
+    await a.api('POST', '/api/buckets/doomed/objects/kept.txt', { hello: 'world' })
+
+    const bucket = await a.context.repo.findOne('bucket', { name: 'doomed' })
+    await a.context.replication.createPeer({
+        name: 'ghost-peer', endpoint: 'http://127.0.0.1:1/s3', accessKeyId: 'AKIAGHOST', secret: 'ghost-secret',
+    })
+    const node = await a.context.objects.getNode(bucket.id, 'kept.txt')
+    const queued = await a.context.replication.enqueue({ bucket, node, op: 'PUT' })
+    assert.equal(queued, 1, 'a task must be queued for the peer')
+    assert.equal(await a.context.repo.count('replication_task', { bucketId: bucket.id, status: 'pending' }), 1)
+
+    await a.api('DELETE', '/api/buckets/doomed?force=true')
+
+    const pending = await a.context.repo.count('replication_task', { bucketId: bucket.id, status: 'pending' })
+    assert.equal(pending, 0, 'no task may keep retrying against a deleted bucket')
+    const retired = await a.context.repo.findOne('replication_task', { bucketId: bucket.id })
+    assert.equal(retired.status, 'failed')
+    assert.equal(retired.nextAttemptAt, null)
+    assert.match(String(retired.lastError), /bucket was deleted/)
+})

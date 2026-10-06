@@ -148,6 +148,12 @@ const createBuckets = (deps) => {
         await repo.delete('bucket_policy', { bucketId: bucket.id })
         await repo.delete('lifecycle_rule', { bucketId: bucket.id })
         await repo.delete('tiering_policy', { bucketId: bucket.id })
+        // Replication can never succeed once its source bucket is gone: retire
+        // the outstanding tasks instead of retrying (and logging) until the
+        // attempt limit runs out.
+        await repo.update('replication_task', { bucketId: bucket.id, status: 'pending' }, {
+            status: 'failed', lastError: 'source bucket was deleted', nextAttemptAt: null,
+        }).catch(() => {})
         await repo.delete('bucket', { id: bucket.id })
         events?.emit('BUCKET_REMOVED', { bucket }).catch(() => {})
 
