@@ -43,7 +43,9 @@ const createShares = (deps = {}) => {
 
     const resolve = async (token, { password } = {}) => {
         const share = await repo.findOne('share_link', { token })
-        if (!share) throw errors.accessDenied('Invalid or revoked share link')
+        // unknown or revoked token: nothing to authorise against, so this is a
+        // missing resource - do not confirm whether the token ever existed
+        if (!share) throw errors.noSuchShare(token)
         if (share.expiresAt && new Date(share.expiresAt).getTime() < Date.now()) throw errors.accessDenied('Share link has expired')
         if (share.maxDownloads && Number(share.downloads) >= Number(share.maxDownloads)) throw errors.accessDenied('Share link download limit reached')
         if (share.passwordHash) {

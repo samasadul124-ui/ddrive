@@ -92,7 +92,7 @@ const createBuckets = (deps) => {
             if (patch[f] !== undefined) allowed[f] = patch[f]
         })
         if (allowed.versioning && !['off', 'enabled', 'suspended'].includes(allowed.versioning)) {
-            throw new errors.validation('versioning must be one of off, enabled, suspended')
+            throw errors.validation('versioning must be one of off, enabled, suspended')
         }
         if (allowed.defaultRetentionDays && !bucket.objectLockEnabled && !patch.objectLockEnabled) {
             throw errors.invalidRequest('Object Lock must be enabled before setting a default retention')

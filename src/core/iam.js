@@ -149,7 +149,7 @@ const createIam = (deps = {}) => {
         if (!/^[A-Za-z0-9._@-]{3,64}$/.test(username)) throw errors.validation('Username must be 3-64 characters (letters, digits, . _ @ -)')
         assertPassword(input.password, username)
         const existing = await repo.findOne('user', { username })
-        if (existing) throw new errors.userExists(`User ${username} already exists`)
+        if (existing) throw errors.userExists(`User ${username} already exists`)
         const { hash, salt } = hashPassword(input.password)
         const user = await repo.insert('user', {
             username,
@@ -174,7 +174,7 @@ const createIam = (deps = {}) => {
 
     const getUser = async (username) => {
         const user = await repo.findOne('user', { username })
-        if (!user) throw new errors.noSuchUser(`User ${username} does not exist`)
+        if (!user) throw errors.noSuchUser(`User ${username} does not exist`)
 
         return user
     }
@@ -241,6 +241,21 @@ const createIam = (deps = {}) => {
     }
 
     const listGroups = () => repo.find('principal_group', {}, { orderBy: [{ column: 'name', dir: 'asc' }] })
+    const getGroup = async (name) => {
+        const group = await repo.findOne('principal_group', { name })
+        if (!group) throw errors.noSuchGroup(name)
+
+        return group
+    }
+
+    /** Role names bound to a group (members inherit their policies). */
+    const rolesOfGroup = async (groupId) => {
+        const bindings = await repo.find('principal_role', { principalType: 'group', principalId: groupId })
+        if (!bindings.length) return []
+        const roles = await repo.find('role', { id: { in: bindings.map((b) => b.roleId) } })
+
+        return roles.map((r) => r.name)
+    }
     const deleteGroup = async (name) => {
         const group = await repo.findOne('principal_group', { name })
         if (!group) throw errors.noSuchGroup(name)
@@ -380,7 +395,9 @@ const createIam = (deps = {}) => {
             system: !!input.system,
         })
     }
-    const updateRole = (name, patch) => {
+    const updateRole = async (name, patch) => {
+        const role = await repo.findOne('role', { name })
+        if (!role) throw errors.noSuchRole(name)
         const update = {}
         if (patch.description !== undefined) update.description = patch.description
         if (patch.policies !== undefined) update.policies = patch.policies
@@ -448,14 +465,22 @@ const createIam = (deps = {}) => {
         const roleIds = [...new Set([...bindings, ...groupBindings].map((b) => b.roleId))]
         if (!roleIds.length) return { documents: [], roles: [] }
         const roles = await repo.find('role', { id: { in: roleIds } })
-        const policyNames = [...new Set(roles.flatMap((r) => (r.policies || []).map((p) => p.name || p)))]
+        // A role's `policies` entry is either a policy *name* (string, or
+        // { name }) or an inline document ({ Statement }). Only names may be
+        // looked up; an inline document must never be used as a lookup key,
+        // or the query degrades into "pick any policy row".
+        const isInlineDocument = (entry) => entry && typeof entry === 'object' && entry.Statement
+        const policyNames = [...new Set(roles.flatMap((r) => (r.policies || [])
+            .filter((p) => !isInlineDocument(p))
+            .map((p) => (typeof p === 'string' ? p : p && p.name))
+            .filter((name) => typeof name === 'string' && name)))]
         const documents = []
         for (const name of policyNames) {
             // eslint-disable-next-line no-await-in-loop
             const policy = await repo.findOne('policy', { name })
             if (policy) documents.push(policy.document)
         }
-        const inlineStatements = roles.flatMap((r) => (r.policies || []).filter((p) => p.Statement))
+        const inlineStatements = roles.flatMap((r) => (r.policies || []).filter(isInlineDocument))
         documents.push(...inlineStatements)
 
         return { documents, roles: roles.map((r) => r.name) }
@@ -609,6 +634,8 @@ const createIam = (deps = {}) => {
         verifyPassword,
         createGroup,
         listGroups,
+        getGroup,
+        rolesOfGroup,
         deleteGroup,
         addGroupMember,
         removeGroupMember,

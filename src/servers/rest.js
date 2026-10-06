@@ -929,6 +929,26 @@ const createRestServer = (context, deps) => {
         return json(req, reply, group, 201)
     }))
 
+    // bind roles to a group (all members inherit them)
+    route('POST', '/api/admin/groups/:name/roles', {}, adminOnly(async (req, reply, params) => {
+        const group = await iam.getGroup(params.name)
+        await iam.setGroupRoles(group.id, req.body?.roles || [])
+
+        return json(req, reply, { ok: true, group: group.name, roles: await iam.rolesOfGroup(group.id) })
+    }))
+
+    route('DELETE', '/api/admin/groups/:name/roles/:role', {}, adminOnly(async (req, reply, params) => {
+        const group = await iam.getGroup(params.name)
+        const bindings = await repo.find('principal_role', { principalType: 'group', principalId: group.id })
+        const role = await repo.findOne('role', { name: params.role })
+        if (!role) throw errors.noSuchRole(params.role)
+        if (!bindings.some((b) => b.roleId === role.id)) throw errors.validation(`Group ${group.name} does not have role ${params.role}`)
+        await repo.delete('principal_role', { principalType: 'group', principalId: group.id, roleId: role.id })
+        reply.code(204)
+
+        return reply.send('')
+    }))
+
     route('DELETE', '/api/admin/groups/:name', {}, adminOnly(async (req, reply, params) => {
         await iam.deleteGroup(params.name)
         reply.code(204)

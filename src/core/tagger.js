@@ -233,10 +233,16 @@ const createTagger = (deps = {}) => {
      * Classify an object and merge the resulting tags into the object row and
      * the tag index. Called on upload (applyOn upload/both) and by `sweep()`.
      */
-    const applyOnUpload = async ({ bucket, node, actor }) => {
+    const applyOnUpload = async ({
+        bucket, node, actor, trigger = 'upload',
+    }) => {
         if (!node || node.type !== 'file') return { tags: {}, applied: [] }
         const rules = await rulesFor(bucket, node)
-        const active = rules.filter((rule) => rule.applyOn === 'upload' || rule.applyOn === 'both')
+        // `trigger` is 'upload' when an object is written and 'sweep' when the
+        // rules are re-run over existing objects; a rule with applyOn 'both'
+        // fires in either case. Without this a sweep-only rule would be picked
+        // up by sweep() and then filtered out here, i.e. never applied.
+        const active = rules.filter((rule) => rule.applyOn === trigger || rule.applyOn === 'both')
         const sample = await readSample(bucket, node)
         const base = classify({
             name: node.name, contentType: node.contentType, size: node.size, sample,
@@ -353,7 +359,7 @@ const createTagger = (deps = {}) => {
             // eslint-disable-next-line no-await-in-loop
             const bucketRow = bucket || await repo.findOne('bucket', { id: node.bucketId })
             // eslint-disable-next-line no-await-in-loop
-            const res = await applyOnUpload({ bucket: bucketRow, node }).catch(() => null)
+            const res = await applyOnUpload({ bucket: bucketRow, node, trigger: 'sweep' }).catch(() => null)
             if (res && Object.keys(res.tags || {}).length) tagged += 1
         }
 

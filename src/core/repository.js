@@ -192,6 +192,14 @@ class Repository {
                     if (value.is === null) push(`"${key}" is null`, [])
                     else push(`"${key}" is ?`, [value.is])
                 }
+                // No recognised operator: compare the value as-is (the drivers
+                // serialise plain objects to JSON, which is what a json column
+                // stores). Silently dropping the condition here would turn a
+                // targeted lookup into "match any row" - never do that.
+                if (!Object.keys(value).some((opName) => OPERATORS[opName]
+                    || ['in', 'notIn', 'like', 'startsWith', 'raw', 'is'].includes(opName))) {
+                    push(`"${key}" = ?`, [value])
+                }
 
                 return
             }
