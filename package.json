@@ -20,7 +20,8 @@
     "migration:latest": "knex migrate:latest",
     "migration:up": "knex migrate:up",
     "migration:down": "knex migrate:down",
-    "migration:make": "knex migrate:make"
+    "migration:make": "knex migrate:make",
+    "test": "node --test \"test/*.test.js\""
   },
   "bin": {},
   "engines": {
@@ -41,6 +42,7 @@
     "@fastify/multipart": "^7.3.0",
     "@fastify/static": "^6.6.0",
     "dotenv": "^16.0.3",
+    "fast-xml-parser": "^5.11.2",
     "fastify": "^4.11.0",
     "knex": "^2.4.0",
     "lodash": "^4.17.21",
