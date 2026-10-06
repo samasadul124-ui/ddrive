@@ -1,5 +1,222 @@
 <h1 align="center" style="font-size: 60px"> DDRIVE </h1>
 
+> **This branch (`arena/2ed54c7d-ddrive`) is DDrive 2.0 — a complete cloud storage
+> platform.** The repository below still documents the original Discord-backed
+> layer; everything in this section is the current system, and it runs with
+> **no Discord, no Postgres and no Docker** if you want it to.
+
+## 60-second quickstart (SQLite + local disk)
+
+One line — clone, install, run (PowerShell 5.1 and bash both accept `;`):
+
+```bash
+git clone -b arena/2ed54c7d-ddrive https://github.com/samasadul124-ui/ddrive.git ddrive; cd ddrive; npm install; npm start
+```
+
+Then open <http://localhost:3000> and drop a file on the page. Already have the
+clone? `git pull; npm install; npm start` is enough.
+
+```bash
+npm install
+npm start
+```
+
+That is the whole setup on this branch. **There is no login and no password:**
+SQLite database (`data/ddrive.sqlite`), local object store (`data/`), HTTP
+server on `http://localhost:3000`, and every request is served as the
+administrator. Open <http://localhost:3000> and start uploading.
+
+> ⚠️ **Authentication is disabled by default.** Anyone who can reach the port
+> can read, write and delete everything, and change settings. That is fine on
+> your own machine or a trusted LAN. If the port is reachable from the internet,
+> set up a password (below) or bind `HOST=127.0.0.1` and keep it local. DDrive
+> prints a warning at every boot while authentication is off.
+
+### Turning the password back on
+
+```bash
+AUTH_MODE=basic BOOTSTRAP_ADMIN_PASSWORD='Some-Good-Passw0rd' npm start
+```
+
+The panel, WebDAV and the S3 API then require credentials (browser prompt for
+the panel, Basic auth for WebDAV, SigV4 or an access key for S3). On the first
+boot with `AUTH_MODE=basic` and no password set, DDrive generates one and prints
+it:
+
+```
+Created administrator "admin" with generated password: <password>
+```
+
+The password policy (same one the API enforces) is at least 8 characters with
+lower case, upper case and a digit, and it may not contain the username.
+A legacy `AUTH=user:password` line also turns authentication on, because setting
+a credential pair is an explicit request to be asked for it.
+
+| Surface | URL | Notes |
+| --- | --- | --- |
+| Web console | `http://localhost:3000/` | buckets, browse, upload, versions, shares, IAM, audit |
+| REST API | `http://localhost:3000/api` | JSON API used by the console and SDK |
+| **WebDAV** | `http://localhost:3000/webdav` | mountable Class 1/2/3 server (`DAV: 1, 2, 3`) |
+| S3 API | `http://localhost:3000/s3` | SigV4, path + virtual-host style, multipart |
+| Health / metrics | `/healthz`, `/readyz`, `/metrics` | liveness, readiness, Prometheus |
+
+Every surface answers without credentials by default; `AUTH_MODE=basic` makes
+all of them require a password.
+
+**Encryption is on by default too.** On the first boot DDrive generates a master
+key at `DATA_DIR/master.key` (mode 0600) and uses it to encrypt object bytes and
+secret material at rest (access keys, replication credentials). The key file is
+logged in the boot output - **keep it with your data**: without it those objects
+cannot be decrypted. Set `MASTER_KEY` (or `MASTER_KEY_FILE`) to manage the key
+yourself, which is required when `NODE_ENV=production`.
+
+Not sure it works? Start the server, then in a second terminal run the self-check -
+it uploads real bytes through all three surfaces, reads them back and compares:
+
+```bash
+npm run check          # add: DDRIVE_USER=admin DDRIVE_PASSWORD=… if a password is set
+```
+
+Requires **Node.js 22.5 or newer** (the default database driver uses Node's own
+SQLite). An older runtime stops with a message telling you exactly that instead of
+a stack trace.
+
+Try it: `curl -u admin:<password> http://localhost:3000/api/buckets` — or mount it:
+
+```bash
+# macOS Finder: Go > Connect to Server... ; Linux:
+sudo mount -t davfs http://localhost:3000/webdav /mnt/ddrive
+# Windows: map a network drive to http://localhost:3000/webdav
+```
+
+## Using Discord as the storage backend
+
+Discord only stores the object **bytes**; buckets, versions, metadata and the
+audit trail live in the database, and the console lists your files from there.
+So you must keep the database (or its file) - if it is lost, the bytes are still
+on Discord but DDrive has no map to them. This is why the default is local disk
+and Discord is opt-in.
+
+```bash
+STORAGE_DRIVER=discord WEBHOOKS='https://discord.com/api/webhooks/…/…,https://discord.com/api/webhooks/…/…' MASTER_KEY="$(openssl rand -hex 32)" BOOTSTRAP_ADMIN_PASSWORD='Some-Good-Passw0rd' npm start
+```
+
+Or put the same three lines in `config/.env` (`STORAGE_DRIVER=discord`,
+`WEBHOOKS=…`, `MASTER_KEY=…`) and run `npm start` - that is what `config/.env_sample`
+documents. Create one webhook per text channel (5 is a good number) at
+Discord → channel → Integrations → Webhooks.
+
+**Chunk size.** A Discord webhook accepts at most 10 MiB (`10485760` bytes) per
+request. DDrive defaults to `10420224` bytes, which leaves 64 KiB for the
+multipart envelope and the encryption tag - a chunk of exactly 10 MiB would be
+rejected with HTTP 413. If you set `CHUNK_SIZE` higher on a Discord deployment it
+is clamped to that value and the server tells you so at boot; the startup line
+also prints the storage backend, chunk size and webhook count. Raising or
+lowering `CHUNK_SIZE` later never invalidates stored objects: downloads read the
+chunk size each version was written with.
+
+Startup on a working Discord deployment looks like:
+
+```
+[ddrive] storage=discord chunk=9.9 MiB data=5 webhook(s) db=sqlite
+Server listening at http://0.0.0.0:3000
+```
+
+## What is implemented
+
+| Category | Must-have (done) | Advanced (done) |
+| --- | --- | --- |
+| **Durability** | Multi-AZ replication between nodes (`src/core/replication.js`, peers push objects, deletes and metadata with HMAC-signed requests) | Cross-region peers + prefix-scoped links, per-peer backlog/health, `POST /api/admin/replication/:name/test`, S3-compatible peers |
+| **Security** | AES-256-GCM envelope encryption per object (per-object DEK wrapped by the master key) + full IAM (users, groups, roles, policies, access keys, bucket policies). Request authentication is off by default (`AUTH_MODE`) - the encryption and the IAM engine are unaffected by that switch | Object Lock + legal hold (retention modes, server-side enforcement), key hierarchy with `MASTER_KEY_FILE` / KMS-style `keyId` + wrapping key rotation hooks |
+| **Management** | Versioning (version ids, delete markers, restore) and lifecycle rules (expiry, non-current expiry, abort multipart, tier transitions) | AI/rule-based auto-tagging (`auto_tag_rule`, prefix+regex+sweep) with tag search, intelligent tiering policies (`tiering_policy`, hot/cold backends, migration worker) |
+| **Access** | REST API + SDK module, WebDAV, S3 API, shares (presigned-style links), multipart upload, ranged downloads | Event-driven delivery (`event_target`, `event_delivery`, retries, dead letters) + serverless-style webhook triggers |
+| **Compliance** | Tamper-evident encryption audit log (hash-chained `audit_event`, `audit.verify()`, compliance queries) | Retention/legal-hold enforcement + auditor role; certification work is deployment-specific (see "Compliance notes") |
+
+Also present: quota enforcement, metrics and structure-aware storage tiers
+(`local`, `memory`, `s3`, `discord`) - see "Using Discord as the storage
+backend" above, and the original DDrive documentation at the end of this file.
+
+## Two deployment modes
+
+**Single node (default)** — SQLite + local disk. Nothing external required.
+Data lives in `DATA_DIR`; the whole database is one file you can copy, and the
+admin password is generated on first boot (see above).
+
+**Production** — Postgres + (local disk | S3 | Discord) storage:
+
+```bash
+DB_DRIVER=postgres \
+DATABASE_URL=postgres://user:pass@host:5432/ddrive \
+MASTER_KEY="$(openssl rand -hex 32)" \
+BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 18)" \
+STORAGE_DRIVER=s3 S3_BUCKET=my-ddrive S3_REGION=eu-west-1 \
+npm start
+```
+
+The schema is created/upgraded automatically on boot
+(`migrations/20260101000000_2.0.0_baseline.js`, generated from the single
+declarative schema in `src/db/schema.js`), so `npm start` is still the only
+command. `npm run migration:latest` does the same thing manually.
+
+*Upgrading a pre-2.0 database:* the baseline migration detects the old
+`directory`/`block` tables, copies their rows into `legacy_directory` /
+`legacy_block`, and only then removes them. Nothing is dropped without a copy.
+`CREATE EXTENSION pgcrypto` is attempted but not required (managed Postgres
+often forbids it; Postgres 13+ needs no extension).
+
+## Tests
+
+```bash
+npm test        # 98 tests, no network, no Docker, no Postgres needed
+```
+
+The suite boots the real server in-process. It includes a WebDAV client suite,
+SigV4 signing tests, tamper-evidence checks for the audit chain, Discord storage
+against a local stub, **multi-AZ replication between two live nodes**, and
+**the whole application running on the Postgres driver** (via `pg-mem`, so the
+production path is covered in CI without a database server). The Discord tests
+use a local double that enforces the real 10 MiB webhook limit, so a chunk size
+Discord would refuse fails in the suite instead of only in production.
+
+## Configuration reference (2.0 additions)
+
+```shell
+DB_DRIVER=sqlite|postgres      # defaults to postgres when DATABASE_URL is set
+SQLITE_FILE=./data/ddrive.sqlite
+DATA_DIR=./data
+AUTH_MODE=none|basic           # none (default) = no login at all
+BOOTSTRAP_ADMIN_USER=admin     # the account used when auth is off
+BOOTSTRAP_ADMIN_PASSWORD=      # only with AUTH_MODE=basic
+MASTER_KEY=<32-byte hex>       # optional: without it a key is generated on first
+                               # boot at DATA_DIR/master.key (0600) and reused.
+                               # Back that file up: it decrypts your data.
+MASTER_KEY_AUTOGENERATE=true   # set false to require an explicit MASTER_KEY
+STORAGE_DRIVER=local|s3|discord|memory
+CHUNK_SIZE=10420224            # clamps to 10 MiB minus overhead on Discord
+WEBHOOKS=url1,url2             # required when any backend is discord
+MASTER_KEY=<32-byte hex>       # envelope encryption; MASTER_KEY_FILE also supported
+BOOTSTRAP_ADMIN_USER=admin
+BOOTSTRAP_ADMIN_PASSWORD=<set before first boot>
+NODE_NAME=az1 NODE_REGION=eu-west-1a   # used by replication/node identity
+WEBDAV_PATH=/webdav  S3_PATH=/s3  REST_PATH=/api
+```
+
+The server prints the resolved storage configuration on every boot, e.g.
+`[ddrive] storage=discord chunk=9.9 MiB data=5 webhook(s) db=sqlite`, so you
+can always see which backend and chunk size are in effect.
+
+## Compliance notes
+
+Encryption and its audit trail are implemented (per-object encryption, wrapped
+keys, hash-chained audit records, retention/legal hold, auditor role, metrics).
+Certification (SOC 2 / ISO 27001 / HIPAA paperwork) is an organisational
+process, not code — the technical controls it audits are the ones listed above.
+
+---
+
+### Original DDrive documentation (Discord-backed storage layer)
+
+
 <p align="center"><strong> Turn Discord into a datastore that can manage and store your files. </strong></p>
 <p align="center">
     <a href="https://discord.gg/3TCZRYafhW">
@@ -98,7 +315,8 @@ PORT=3000 # HTTP Port where ddrive panel will start running
 
 REQUEST_TIMEOUT=60000 # Time in ms after which ddrive will abort request to discord api server. Set it high if you have very slow internet
 
-CHUNK_SIZE=25165824 # ChunkSize in bytes. You should probably never touch this and if you do  don't set it to more than 25MB, with discord webhooks you can't upload file bigger than 25MB
+CHUNK_SIZE=10420224 # ChunkSize in bytes. Max 10MB per Discord webhook request (10 MiB = 10485760 bytes),
+                     # so anything larger is rejected with HTTP 413 and clamped by DDrive at boot.
 
 SECRET=someverysecuresecret # If you set this every files on discord will be stored using strong encryption, but it will cause significantly high cpu usage, so don't use it unless you're storing important stuff
 

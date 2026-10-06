@@ -20,14 +20,19 @@
     "migration:latest": "knex migrate:latest",
     "migration:up": "knex migrate:up",
     "migration:down": "knex migrate:down",
-    "migration:make": "knex migrate:make"
+    "migration:make": "knex migrate:make",
+    "test": "node --test \"test/*.test.js\"",
+    "discord:lab": "node scripts/discord-lab.js",
+    "discord:check": "node scripts/discord-live-check.js",
+    "check": "node scripts/self-check.js"
   },
   "bin": {},
   "engines": {
-    "node": "16.x"
+    "node": ">=22.5.0"
   },
   "devDependencies": {
-    "@forscht/eslint-config": "latest"
+    "@forscht/eslint-config": "latest",
+    "pg-mem": "^3.0.14"
   },
   "eslintConfig": {
     "env": {
@@ -41,6 +46,7 @@
     "@fastify/multipart": "^7.3.0",
     "@fastify/static": "^6.6.0",
     "dotenv": "^16.0.3",
+    "fast-xml-parser": "^5.11.2",
     "fastify": "^4.11.0",
     "knex": "^2.4.0",
     "lodash": "^4.17.21",

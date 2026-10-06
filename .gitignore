@@ -7,3 +7,8 @@ test/coverage/
 !**/.keep
 dist
 .env
+
+# runtime state (default DATA_DIR / SQLITE_FILE live here)
+data/
+*.sqlite
+*.sqlite-journal

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DDrive Console</title>
+    <link rel="stylesheet" href="./app.css">
+    <link rel="icon" href="/favicon.png">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand"><span class="logo">◈</span> DDrive <span class="muted">console</span></div>
+    <nav id="tabs" class="tabs"></nav>
+    <div class="spacer"></div>
+    <div id="identity" class="identity"></div>
+    <button id="theme" class="ghost" title="Toggle theme">◐</button>
+</header>
+
+<main id="view" class="view">
+    <section id="login-view" class="card login">
+        <h1>Sign in</h1>
+        <p class="muted">Use your DDrive administrator or user credentials.</p>
+        <form id="login-form">
+            <input id="login-user" autocomplete="username" placeholder="username" required>
+            <input id="login-pass" type="password" autocomplete="current-password" placeholder="password" required>
+            <input id="login-mfa" placeholder="MFA code (if enabled)">
+            <button class="primary" type="submit">Sign in</button>
+        </form>
+        <p id="login-error" class="error"></p>
+    </section>
+</main>
+
+<div id="toast" class="toast"></div>
+<script src="./app.js"></script>
+</body>
+</html>
