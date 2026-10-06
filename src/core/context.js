@@ -58,7 +58,7 @@ const createContext = (config, opts = {}) => {
         masterKeyFile: config.security.masterKeyFile,
         keyFilePath: config.security.masterKeyFilePath,
         autoGenerate: config.security.autoGenerateMasterKey,
-        onGenerate: (file) => logger.warn?.(`Generated a local encryption key at ${file}. `
+        onGenerate: (file) => logger.info?.(`Generated a local encryption key at ${file}. `
             + 'It encrypts object bytes and secret material at rest: back it up with your data, '
             + 'and set MASTER_KEY (or MASTER_KEY_FILE) to use your own.'),
         onGenerateError: (err) => logger.error?.({ err }, 'could not store the local encryption key'),
