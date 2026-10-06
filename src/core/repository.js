@@ -42,11 +42,21 @@ const codec = {
     bigint: (value) => (value === null || value === undefined ? value : Number(value)),
 }
 
-/** Serialize a value for storage (json objects are stringified by the drivers). */
+/**
+ * Serialize a value for storage.
+ *
+ * JSON columns must be stringified here rather than left to the drivers: the
+ * sqlite driver stringifies objects, but node-postgres sends a JS *array* as a
+ * Postgres array literal (and a plain object as garbage), so a rediscovered
+ * role policy list or object tag map would be stored mangled on Postgres.
+ * Doing it in one place keeps both dialects byte-identical.
+ */
 const encodeValue = (type, value) => {
     if (value === undefined) return null
     if (value === null) return null
-    if (type === 'json' && typeof value !== 'object') return value
+    if (type === 'json' && typeof value === 'object' && !Buffer.isBuffer(value) && !(value instanceof Date)) {
+        return JSON.stringify(value)
+    }
 
     return value
 }

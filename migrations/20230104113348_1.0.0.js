@@ -1,77 +1,24 @@
-const DIRECTORY_TABLE = 'directory'
-const BLOCKS_TABLE = 'block'
-
 /**
- * @param { import("knex").Knex } knex
- * @returns { Promise<void> }
+ * DDrive 1.0 virtual filesystem (historical, retained as a no-op).
+ *
+ * This migration created `directory` + `block` for the original flat VFS, which
+ * the 2.0 rewrite replaced with the bucket/object model. It is kept in the
+ * migration directory, with an empty body, purely so that databases which
+ * already applied it are not reported by knex as a corrupt migration directory
+ * ("the following files are missing").
+ *
+ * - Fresh deployments: this file does nothing; the 2.0 baseline migration
+ *   (20260101000000_2.0.0_baseline.js) creates the complete schema.
+ * - Existing 1.0 deployments: the baseline migration detects the legacy
+ *   `directory`/`block` tables, copies their rows into `legacy_directory` /
+ *   `legacy_block` and only then drops the originals.
+ *
+ * The original body is in git history (see the commit that introduced this
+ * comment); the archived shapes it created are mirrored in the baseline
+ * migration's LEGACY_TABLES list.
  */
-exports.up = async (knex) => {
-    await knex.schema.createTable(DIRECTORY_TABLE, (table) => {
-        table.uuid('id')
-            .primary()
-            .defaultTo(knex.raw('gen_random_uuid()'))
+exports.up = async () => {}
 
-        table.string('name')
-            .notNullable()
-            .comment('Name of the file')
-
-        table.uuid('parentId')
-            .references('id')
-            .inTable(DIRECTORY_TABLE)
-            .onDelete('CASCADE')
-            .index('directory_parent_id_idx')
-            .comment('Id of the parent')
-        table.enum('type', ['directory', 'file'])
-            .notNullable()
-            .comment('Type of the entry')
-        table
-            .timestamp('createdAt')
-            .notNullable()
-            .defaultTo(knex.fn.now())
-            .comment('We want to know when this entry was created')
-
-        table.unique(['name', 'parentId'])
-    })
-
-    await knex.schema.createTable(BLOCKS_TABLE, (table) => {
-        table.uuid('id')
-            .primary()
-            .defaultTo(knex.raw('gen_random_uuid()'))
-        table
-            .uuid('fileId')
-            .notNullable()
-            .index('block_file_idx')
-            .references('id')
-            .inTable(DIRECTORY_TABLE)
-            .onDelete('CASCADE')
-            .comment('Id of the file from directory table')
-        table
-            .string('url')
-            .notNullable()
-            .comment('URL of the file')
-        table
-            .integer('size')
-            .unsigned()
-            .notNullable()
-            .comment('Size of the block in Bytes')
-        table.string('iv')
-            .nullable()
-            .comment('Iv to decrypt the block')
-        table
-            .timestamp('createdAt')
-            .notNullable()
-            .defaultTo(knex.fn.now())
-            .comment('We want to know when this entry was created')
-    })
-
-    await knex(DIRECTORY_TABLE).insert({ name: 'root', type: 'directory' })
-}
-
-/**
- * @param { import("knex").Knex } knex
- * @returns { Promise<void> }
- */
-exports.down = async (knex) => {
-    await knex.schema.dropTable(BLOCKS_TABLE)
-    await knex.schema.dropTable(DIRECTORY_TABLE)
-}
+// Never destructive on rollback: whether a database still holds 1.0 tables is
+// decided by the baseline migration, which owns the schema from here on.
+exports.down = async () => {}

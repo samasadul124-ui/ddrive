@@ -38,17 +38,31 @@ const createDb = (opts = {}) => {
     throw new Error(`Unsupported DB_DRIVER "${driver}" (expected postgres or sqlite)`)
 }
 
-/** Run the knex migrations for a Postgres deployment. */
-const migratePostgres = async (db) => {
+/**
+ * Run the knex migrations for a Postgres deployment.
+ *
+ * `gen_random_uuid()` needs pgcrypto on Postgres < 13, but creating an
+ * extension requires elevated rights, so on managed clusters (RDS, Cloud SQL,
+ * Neon, Supabase) the statement can legitimately fail - it must not stop the
+ * deployment. The application always generates its own UUIDs, the extension is
+ * only a database-side default.
+ */
+const migratePostgres = async (db, opts = {}) => {
     const knex = db.knex
     if (!knex) throw new Error('migratePostgres requires a postgres driver')
-    await knex.raw('create extension if not exists pgcrypto')
+    let extension = 'created'
+    try {
+        await knex.raw('create extension if not exists pgcrypto')
+    } catch (err) {
+        extension = `unavailable (${err.message.split('\n')[0]})`
+        opts.logger?.warn?.({ err }, 'could not create the pgcrypto extension; continuing')
+    }
     const [batch, files] = await knex.migrate.latest({
         directory: path.join(ROOT, 'migrations'),
         tableName: 'knex_migrations',
     })
 
-    return { batch, files }
+    return { batch, files, extension }
 }
 
 /** Create every table for an embedded SQLite deployment (idempotent). */
@@ -70,7 +84,7 @@ const ensureSchema = async (db, opts = {}) => {
     if (db.dialect === 'sqlite') {
         migrated = await bootstrapSqlite(db)
     } else if (opts.autoMigrate !== false) {
-        migrated = await migratePostgres(db)
+        migrated = await migratePostgres(db, opts)
     }
 
     return migrated
