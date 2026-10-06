@@ -9,9 +9,15 @@
  *     node scripts/discord-live-check.js
  *
  * If you keep the URLs in config/.env (WEBHOOKS=..., STORAGE_DRIVER=discord)
- * a bare `node scripts/discord-live-check.js` picks them up. Pass --size N to
- * test a custom payload size (default 3 MiB, i.e. several chunks at the
- * default 24 MiB chunk size it stays one chunk - set CHUNK_SIZE to force more).
+ * a bare `node scripts/discord-live-check.js` picks them up.
+ *
+ *   --size N    payload to round-trip (default 3 MiB)
+ *   --chunks    also try one chunk of exactly the configured chunk size, which
+ *               is what a real upload sends (catches a CHUNK_SIZE that Discord
+ *               rejects with HTTP 413)
+ *
+ * It reports the effective chunk size first, so a "nothing uploads" report can
+ * be traced to the size limit immediately.
  */
 const crypto = require('crypto')
 const path = require('path')
@@ -24,6 +30,7 @@ const { loadConfig } = require('../src/config')
 const args = process.argv.slice(2)
 const sizeArg = args.indexOf('--size')
 const SIZE = sizeArg >= 0 ? Number(args[sizeArg + 1]) : 3 * 1024 * 1024
+const CHECK_CHUNK = args.includes('--chunks')
 
 const config = loadConfig({ ...process.env, DATA_DIR: process.env.DATA_DIR || path.join(__dirname, '..', 'data') })
 const webhooks = config.storage.webhooks
@@ -39,7 +46,14 @@ const check = (label, ok, extra = '') => {
 }
 
 const main = async () => {
+    const { DISCORD_ATTACHMENT_LIMIT, humanBytes } = require('../src/lib/limits')
     console.log(`webhooks: ${webhooks.length} (${webhooks.map(redact).join(', ')})`)
+    console.log(`chunk size: ${humanBytes(config.storage.chunkSize)} (Discord accepts at most ${humanBytes(DISCORD_ATTACHMENT_LIMIT)} per request)`)
+    if (config.storage.chunkSizeAdjustment) {
+        const adj = config.storage.chunkSizeAdjustment
+        console.log(`note: CHUNK_SIZE=${adj.requested} was clamped to ${humanBytes(adj.applied)}; `
+            + 'discord rejects a larger attachment with HTTP 413')
+    }
 
     const store = createChunkStore({
         driver: 'discord',
@@ -70,6 +84,19 @@ const main = async () => {
     for await (const chunk of ranged) rangedChunks.push(chunk)
     const slice = Buffer.concat(rangedChunks)
     check('ranged read', slice.equals(payload.subarray(10, 42)), `${slice.length} bytes`)
+
+    if (CHECK_CHUNK) {
+        // exactly what a real upload sends: one full chunk
+        const chunk = crypto.randomBytes(config.storage.chunkSize)
+        try {
+            const put = Date.now()
+            const chunkStored = await store.put(chunk)
+            check(`a full ${humanBytes(chunk.length)} chunk is accepted`, true, `${Date.now() - put} ms`)
+            await store.delete(chunkStored.locator)
+        } catch (err) {
+            check(`a full ${humanBytes(chunk.length)} chunk is accepted`, false, err.message)
+        }
+    }
 
     await store.delete(stored.locator)
     check('delete is a safe no-op (the CDN keeps the attachment)', true)

@@ -11,8 +11,19 @@ const https = require('https')
 const { randomUUID } = require('crypto')
 const { errors } = require('../../lib/errors')
 const { sleep } = require('../../lib/util')
+const { DISCORD_ATTACHMENT_LIMIT, DISCORD_MAX_CHUNK, humanBytes } = require('../../lib/limits')
 
-const MAX_ATTACHMENT = 26109542 // hard Discord limit (slightly under 25 MiB)
+/**
+ * Hard Discord limit for a webhook request: 10 MiB on a normal channel. (Nitro
+ * boosts raise it for *user* uploads, but a webhook cannot rely on the channel
+ * having a boost, so 10 MiB is the only safe ceiling - a bigger chunk is
+ * rejected by Discord with HTTP 413 and the upload never lands.) Since the
+ * limit covers the whole multipart body, the largest *chunk* is slightly
+ * smaller: `MAX_ATTACHMENT` is what Discord accepts, `MAX_CHUNK` is what we
+ * send (with encryption and framing headroom).
+ */
+const MAX_ATTACHMENT = DISCORD_ATTACHMENT_LIMIT
+const MAX_CHUNK = DISCORD_MAX_CHUNK
 
 const createDiscordStore = (opts = {}) => {
     // Normalise each entry to a full URL. Discord URLs are rewritten onto
@@ -60,6 +71,15 @@ const createDiscordStore = (opts = {}) => {
                     await sleep(Math.ceil((body.retry_after || 1) * 1000))
                     throw errors.tooManyRequests('Discord rate limit')
                 }
+                if (res.status === 413) {
+                    // Discord 40005 "Request entity too large". Retrying another
+                    // webhook cannot help: the payload itself is too big, so the
+                    // operator has to lower CHUNK_SIZE. Fail fast and say so.
+                    throw errors.invalidArgument(
+                        `Discord rejected the ${humanBytes(buffer.length)} chunk (HTTP 413): a webhook request is `
+                        + `limited to ${humanBytes(MAX_ATTACHMENT)}. Set CHUNK_SIZE=${MAX_CHUNK} (or lower) and restart.`,
+                    )
+                }
                 if (!res.ok) {
                     const text = await res.text().catch(() => '')
                     throw errors.internal(`Discord webhook upload failed (${res.status}) ${text.slice(0, 200)}`)
@@ -70,6 +90,7 @@ const createDiscordStore = (opts = {}) => {
 
                 return attachment
             } catch (err) {
+                if (err.code === 'InvalidArgument' || /too large/i.test(err.message || '')) throw err
                 lastError = err
             }
         }
@@ -79,12 +100,15 @@ const createDiscordStore = (opts = {}) => {
     return {
         name: 'discord',
         tier: opts.tier || 'HOT',
-        maxChunkSize: MAX_ATTACHMENT,
+        maxChunkSize: MAX_CHUNK,
         concurrency,
         async init() { return true },
         async put(buffer) {
-            if (buffer.length > MAX_ATTACHMENT) {
-                throw errors.invalidArgument(`chunk of ${buffer.length} bytes exceeds Discord limit of ${MAX_ATTACHMENT}`)
+            if (buffer.length > MAX_CHUNK) {
+                throw errors.invalidArgument(
+                    `chunk of ${humanBytes(buffer.length)} exceeds the Discord attachment limit of `
+                    + `${humanBytes(MAX_ATTACHMENT)}; set CHUNK_SIZE=${MAX_CHUNK} (or lower) and restart`,
+                )
             }
             const attachment = await upload(buffer, randomUUID())
 
@@ -131,7 +155,14 @@ const createDiscordStore = (opts = {}) => {
                 const webhookUrl = webhooks[0]
                 const res = await fetch(webhookUrl, { signal: AbortSignal.timeout(10000) })
 
-                return { ok: res.status < 500, backend: 'discord', webhooks: webhooks.length, status: res.status }
+                return {
+                    ok: res.status < 500,
+                    backend: 'discord',
+                    webhooks: webhooks.length,
+                    maxAttachmentBytes: MAX_ATTACHMENT,
+                    maxChunkBytes: MAX_CHUNK,
+                    status: res.status,
+                }
             } catch (err) {
                 return { ok: false, backend: 'discord', error: err.message }
             }
@@ -139,4 +170,4 @@ const createDiscordStore = (opts = {}) => {
     }
 }
 
-module.exports = { createDiscordStore, MAX_ATTACHMENT }
+module.exports = { createDiscordStore, MAX_ATTACHMENT, MAX_CHUNK }

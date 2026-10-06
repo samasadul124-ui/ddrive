@@ -1,7 +1,7 @@
 /**
  * Chunk storage facade.
  *
- * A chunk is an opaque blob (up to `maxChunkSize`, default 24 MiB) that the
+ * A chunk is an opaque blob (up to `maxChunkSize`; see src/lib/limits.js) that the
  * object service encrypts and stores through this facade. The facade routes
  * each operation to the right backend based on the locator scheme, which makes
  * tiering transparent for the rest of the system:
@@ -18,6 +18,7 @@ const { errors } = require('../../lib/errors')
 const { createLocalStore } = require('./local')
 const { createMemoryStore } = require('./memory')
 const { createDiscordStore, MAX_ATTACHMENT } = require('./discord')
+const { DEFAULT_CHUNK_SIZE } = require('../../lib/limits')
 const { createS3Store } = require('./s3')
 const { streamToBuffer } = require('../../lib/util')
 
@@ -86,7 +87,7 @@ const createChunkStore = (config = {}) => {
 
     return {
         driver,
-        maxChunkSize: primary.maxChunkSize || config.maxChunkSize || 25165824,
+        maxChunkSize: primary.maxChunkSize || config.maxChunkSize || DEFAULT_CHUNK_SIZE,
         concurrency: primary.concurrency || config.concurrency || 3,
         stores,
         tiers: Object.keys(stores),
@@ -101,8 +102,12 @@ const createChunkStore = (config = {}) => {
         async put(buffer, opts = {}) {
             const tier = TIERS.includes(opts.tier) ? opts.tier : 'HOT'
             const store = stores[tier] || stores.HOT
-            if (buffer.length > this.maxChunkSize && store.maxChunkSize && buffer.length > store.maxChunkSize) {
-                throw errors.invalidArgument(`chunk exceeds backend limit of ${store.maxChunkSize} bytes`)
+            const storeLimit = store.maxChunkSize || this.maxChunkSize
+            if (storeLimit && buffer.length > storeLimit) {
+                throw errors.invalidArgument(
+                    `chunk of ${buffer.length} bytes exceeds the ${store.name} backend limit of ${storeLimit} bytes; `
+                    + `lower CHUNK_SIZE to ${storeLimit} or below`,
+                )
             }
             const res = await store.put(buffer, { key: opts.key })
 

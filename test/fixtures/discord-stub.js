@@ -7,6 +7,11 @@
  *
  * It also lets a test script flakiness: a webhook that returns 429 (with
  * `retry_after`), one that returns 500, or one that is revoked (401).
+ *
+ * Uploads are size checked like the real service: an attachment over
+ * `maxAttachmentBytes` (default 10 MiB, the webhook limit) is rejected with
+ * HTTP 413 and Discord's 40005 code, so a chunk size that Discord would refuse
+ * fails in the test suite instead of only in production.
  */
 const http = require('http')
 const { randomUUID } = require('crypto')
@@ -40,7 +45,10 @@ const extractFile = (contentType, raw) => {
     return null
 }
 
+const { DISCORD_ATTACHMENT_LIMIT } = require('../../src/lib/limits')
+
 const createDiscordStub = (opts = {}) => {
+    const maxAttachmentBytes = opts.maxAttachmentBytes || DISCORD_ATTACHMENT_LIMIT
     /** id -> { name, type, body, chunks: [buffer] } */
     const attachments = new Map()
     /** webhook token -> { status, retryAfter, hits } */
@@ -78,6 +86,13 @@ const createDiscordStub = (opts = {}) => {
                 }
 
                 const raw = Buffer.concat(chunks)
+                if (raw.length > maxAttachmentBytes) {
+                    // same shape as Discord: 413 + code 40005
+                    res.writeHead(413, { 'content-type': 'application/json' })
+                    res.end(JSON.stringify({ message: 'Request entity too large', code: 40005 }))
+
+                    return
+                }
                 const file = extractFile(req.headers['content-type'] || '', raw)
                 if (!file) {
                     res.writeHead(400, { 'content-type': 'application/json' })
@@ -153,6 +168,7 @@ const createDiscordStub = (opts = {}) => {
         server,
         calls,
         attachments,
+        maxAttachmentBytes,
         /** Make a webhook token fail with a HTTP status (429/500/401/...). */
         fail(token, status, retryAfter = 0.05) {
             const state = webhook(token)

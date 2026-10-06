@@ -18,7 +18,12 @@ const { errors } = require('../lib/errors')
 const util = require('../lib/util')
 const { writeChunksFromStream } = require('./chunkWriter')
 
-const DEFAULT_CHUNK_SIZE = 25165824 // 24 MiB
+const { DEFAULT_CHUNK_SIZE: SHARED_CHUNK_SIZE } = require('../lib/limits')
+
+// Fallback only: the configured chunk size (config.storage.chunkSize) is
+// already clamped to the backend limit; this is used when the object service is
+// constructed directly (tests, library use).
+const DEFAULT_CHUNK_SIZE = SHARED_CHUNK_SIZE
 const MAX_TAGS = 10
 const DEFAULT_MULTIPART_TTL_DAYS = 7
 const INTERNAL = Symbol('ddrive.objects.internal')

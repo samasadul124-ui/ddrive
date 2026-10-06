@@ -48,6 +48,39 @@ sudo mount -t davfs http://localhost:3000/webdav /mnt/ddrive
 # Windows: map a network drive to http://localhost:3000/webdav
 ```
 
+## Using Discord as the storage backend
+
+Discord only stores the object **bytes**; buckets, versions, metadata and the
+audit trail live in the database, and the console lists your files from there.
+So you must keep the database (or its file) - if it is lost, the bytes are still
+on Discord but DDrive has no map to them. This is why the default is local disk
+and Discord is opt-in.
+
+```bash
+STORAGE_DRIVER=discord WEBHOOKS='https://discord.com/api/webhooks/…/…,https://discord.com/api/webhooks/…/…' MASTER_KEY="$(openssl rand -hex 32)" BOOTSTRAP_ADMIN_PASSWORD='Some-Good-Passw0rd' npm start
+```
+
+Or put the same three lines in `config/.env` (`STORAGE_DRIVER=discord`,
+`WEBHOOKS=…`, `MASTER_KEY=…`) and run `npm start` - that is what `config/.env_sample`
+documents. Create one webhook per text channel (5 is a good number) at
+Discord → channel → Integrations → Webhooks.
+
+**Chunk size.** A Discord webhook accepts at most 10 MiB (`10485760` bytes) per
+request. DDrive defaults to `10420224` bytes, which leaves 64 KiB for the
+multipart envelope and the encryption tag - a chunk of exactly 10 MiB would be
+rejected with HTTP 413. If you set `CHUNK_SIZE` higher on a Discord deployment it
+is clamped to that value and the server tells you so at boot; the startup line
+also prints the storage backend, chunk size and webhook count. Raising or
+lowering `CHUNK_SIZE` later never invalidates stored objects: downloads read the
+chunk size each version was written with.
+
+Startup on a working Discord deployment looks like:
+
+```
+[ddrive] storage=discord chunk=9.9 MiB data=5 webhook(s) db=sqlite
+Server listening at http://0.0.0.0:3000
+```
+
 ## What is implemented
 
 | Category | Must-have (done) | Advanced (done) |
@@ -58,9 +91,9 @@ sudo mount -t davfs http://localhost:3000/webdav /mnt/ddrive
 | **Access** | REST API + SDK module, WebDAV, S3 API, shares (presigned-style links), multipart upload, ranged downloads | Event-driven delivery (`event_target`, `event_delivery`, retries, dead letters) + serverless-style webhook triggers |
 | **Compliance** | Tamper-evident encryption audit log (hash-chained `audit_event`, `audit.verify()`, compliance queries) | Retention/legal-hold enforcement + auditor role; certification work is deployment-specific (see "Compliance notes") |
 
-Also present: quota enforcement, metrics, structure-aware storage tiers
-(`local`, `memory`, `s3`, `discord`), and the original Discord chunked storage
-(`STORAGE_DRIVER=discord` + `WEBHOOKS=...`).
+Also present: quota enforcement, metrics and structure-aware storage tiers
+(`local`, `memory`, `s3`, `discord`) - see "Using Discord as the storage
+backend" above, and the original DDrive documentation at the end of this file.
 
 ## Two deployment modes
 
@@ -93,14 +126,16 @@ often forbids it; Postgres 13+ needs no extension).
 ## Tests
 
 ```bash
-npm test        # 74 tests, no network, no Docker, no Postgres needed
+npm test        # 84 tests, no network, no Docker, no Postgres needed
 ```
 
 The suite boots the real server in-process. It includes a WebDAV client suite,
 SigV4 signing tests, tamper-evidence checks for the audit chain, Discord storage
 against a local stub, **multi-AZ replication between two live nodes**, and
 **the whole application running on the Postgres driver** (via `pg-mem`, so the
-production path is covered in CI without a database server).
+production path is covered in CI without a database server). The Discord tests
+use a local double that enforces the real 10 MiB webhook limit, so a chunk size
+Discord would refuse fails in the suite instead of only in production.
 
 ## Configuration reference (2.0 additions)
 
@@ -109,15 +144,18 @@ DB_DRIVER=sqlite|postgres      # defaults to postgres when DATABASE_URL is set
 SQLITE_FILE=./data/ddrive.sqlite
 DATA_DIR=./data
 STORAGE_DRIVER=local|s3|discord|memory
+CHUNK_SIZE=10420224            # clamps to 10 MiB minus overhead on Discord
+WEBHOOKS=url1,url2             # required when any backend is discord
 MASTER_KEY=<32-byte hex>       # envelope encryption; MASTER_KEY_FILE also supported
 BOOTSTRAP_ADMIN_USER=admin
 BOOTSTRAP_ADMIN_PASSWORD=<set before first boot>
 NODE_NAME=az1 NODE_REGION=eu-west-1a   # used by replication/node identity
 WEBDAV_PATH=/webdav  S3_PATH=/s3  REST_PATH=/api
-WEBHOOKS=url1,url2             # only for STORAGE_DRIVER=discord
 ```
 
-See `config/.env_sample` for the original Discord-mode variables.
+The server prints the resolved storage configuration on every boot, e.g.
+`[ddrive] storage=discord chunk=9.9 MiB data=5 webhook(s) db=sqlite`, so you
+can always see which backend and chunk size are in effect.
 
 ## Compliance notes
 
@@ -229,7 +267,8 @@ PORT=3000 # HTTP Port where ddrive panel will start running
 
 REQUEST_TIMEOUT=60000 # Time in ms after which ddrive will abort request to discord api server. Set it high if you have very slow internet
 
-CHUNK_SIZE=25165824 # ChunkSize in bytes. You should probably never touch this and if you do  don't set it to more than 25MB, with discord webhooks you can't upload file bigger than 25MB
+CHUNK_SIZE=10420224 # ChunkSize in bytes. Max 10MB per Discord webhook request (10 MiB = 10485760 bytes),
+                     # so anything larger is rejected with HTTP 413 and clamped by DDrive at boot.
 
 SECRET=someverysecuresecret # If you set this every files on discord will be stored using strong encryption, but it will cause significantly high cpu usage, so don't use it unless you're storing important stuff
 

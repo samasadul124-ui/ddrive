@@ -7,7 +7,9 @@
  * worker failures are collected (never left as unhandled rejections) and
  * re-thrown to the caller so it can clean up the chunks that were written.
  */
-const MAX_CHUNK_SIZE = 26109542
+const { MAX_CHUNK_SIZE: SHARED_MAX_CHUNK_SIZE } = require('../lib/limits')
+
+const MAX_CHUNK_SIZE = SHARED_MAX_CHUNK_SIZE
 
 /**
  * @param {import('stream').Readable} stream

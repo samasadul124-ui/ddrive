@@ -9,6 +9,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const util = require('../lib/util')
+const limits = require('../lib/limits')
 
 const bool = (value, fallback) => {
     if (value === undefined || value === null || value === '') return fallback
@@ -76,11 +77,40 @@ const loadConfig = (env = process.env, opts = {}) => {
         }
     }
 
+    const storageDriver = (env.STORAGE_DRIVER || 'local').toLowerCase()
+    // Tiers can point at a different backend than the primary one, so the
+    // effective ceiling has to consider all of them.
+    const driversInUse = [
+        storageDriver,
+        (env.TIER_COOL_DRIVER || '').toLowerCase(),
+        (env.TIER_ARCHIVE_DRIVER || '').toLowerCase(),
+    ].filter(Boolean)
+    const discordBacked = driversInUse.includes('discord')
+    const maxChunkSize = discordBacked ? limits.DISCORD_MAX_CHUNK : limits.MAX_CHUNK_SIZE
+    const requestedChunkSize = int(env.CHUNK_SIZE, limits.DEFAULT_CHUNK_SIZE)
+    const chunkSize = Math.max(1, Math.min(requestedChunkSize, maxChunkSize))
+    // Reported rather than applied silently: a Discord deployment physically
+    // cannot accept a larger attachment, so the only useful behaviour is to use
+    // the limit - but the operator has to be told, or it looks like the setting
+    // was ignored. The server logs this at boot (see core/context.js).
+    const chunkSizeAdjustment = requestedChunkSize > maxChunkSize
+        ? {
+            requested: requestedChunkSize,
+            applied: chunkSize,
+            limit: maxChunkSize,
+            drivers: driversInUse,
+        }
+        : null
+
     const storage = {
-        driver: (env.STORAGE_DRIVER || 'local').toLowerCase(),
+        driver: storageDriver,
         dataDir,
         directory: absolute(env.STORAGE_DIRECTORY || path.join(dataDir, 'chunks'), cwd),
-        chunkSize: Math.min(int(env.CHUNK_SIZE, 25165824), 26109542),
+        chunkSize,
+        requestedChunkSize,
+        maxChunkSize,
+        chunkSizeAdjustment,
+        discordBacked,
         concurrency: int(env.UPLOAD_CONCURRENCY, 3),
         webhooks: readWebhooks(env, cwd),
         // override the Discord REST base (self-hosted webhook proxies, tests)
@@ -91,8 +121,6 @@ const loadConfig = (env = process.env, opts = {}) => {
         verifyLimitBytes: int(env.S3_VERIFY_PAYLOAD_BYTES, 268435456),
         cool: tier('TIER_COOL'),
         archive: tier('TIER_ARCHIVE'),
-        // memory driver is testing only
-        maxChunkSize: 26109542,
     }
 
     const publicAccess = (env.PUBLIC_ACCESS || '').toUpperCase() || null
@@ -205,8 +233,12 @@ const loadConfig = (env = process.env, opts = {}) => {
 /** Fail fast on configuration that would be insecure or broken in production. */
 const validate = (config) => {
     const problems = []
+    if (config.storage.driver === 'memory') problems.push('STORAGE_DRIVER=memory is for tests only: data is lost on restart')
+    if (config.storage.discordBacked && !config.storage.webhooks.length) {
+        problems.push('STORAGE_DRIVER=discord (or a Discord tier) requires WEBHOOKS with at least one webhook URL, '
+            + 'comma separated - see the setup guide in README.md')
+    }
     if (config.isProduction) {
-        if (config.storage.driver === 'memory') problems.push('STORAGE_DRIVER=memory must not be used in production')
         if (!config.security.masterKey && !config.security.masterKeyFile && !config.security.kmsEndpoint) {
             problems.push('MASTER_KEY (or KMS_ENDPOINT) is required in production: data would be stored unencrypted')
         }
@@ -235,6 +267,7 @@ module.exports = {
     int,
     list,
     VALID_PUBLIC_ACCESS: ['READ_ONLY_FILE', 'READ_ONLY_PANEL'],
-    DEFAULT_CHUNK_SIZE: 25165824,
-    MAX_CHUNK_SIZE: 26109542,
+    DEFAULT_CHUNK_SIZE: limits.DEFAULT_CHUNK_SIZE,
+    MAX_CHUNK_SIZE: limits.MAX_CHUNK_SIZE,
+    DISCORD_ATTACHMENT_LIMIT: limits.DISCORD_ATTACHMENT_LIMIT,
 }

@@ -222,6 +222,13 @@ const createContext = (config, opts = {}) => {
 
     const bootstrap = async () => {
         if (bootstrapped) return { alreadyBootstrapped: true }
+        if (config.storage.chunkSizeAdjustment) {
+            const adj = config.storage.chunkSizeAdjustment
+            logger.warn?.(
+                `CHUNK_SIZE ${adj.requested} exceeds the ${adj.limit} byte limit of the `
+                + `${adj.drivers.join('/')} backend; using ${adj.applied} bytes instead`,
+            )
+        }
         await ensureSchema(db, { autoMigrate: config.database.autoMigrate })
         await store.init()
         const seeded = await seed()
